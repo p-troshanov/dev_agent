@@ -4,6 +4,7 @@ import json
 import time
 import re
 import asyncio
+import urllib.request
 from typing import Any
 from litellm import acompletion
 import litellm
@@ -18,6 +19,10 @@ key_cooldowns = {
     "gemini": {},
     "openrouter": {}
 }
+
+# Кэш тарифов OpenRouter (в памяти)
+OR_MODELS_CACHE = {}
+OR_CACHE_TIME = 0
 
 def get_keys_from_db(provider: str, user_id: int) -> list:
     try:
@@ -61,23 +66,54 @@ def _extract_total_tokens(usage_obj):
 def _calculate_cost(provider, model_name, usage_obj):
     if provider in ["groq", "gemini"]:
         return 0.0
+        
+    p_tok, c_tok = 0, 0
+    if usage_obj:
+        if isinstance(usage_obj, dict):
+            p_tok = usage_obj.get('prompt_tokens', 0)
+            c_tok = usage_obj.get('completion_tokens', 0)
+        else:
+            p_tok = getattr(usage_obj, 'prompt_tokens', 0)
+            c_tok = getattr(usage_obj, 'completion_tokens', 0)
+            
+    if provider == "openrouter":
+        global OR_MODELS_CACHE, OR_CACHE_TIME
+        
+        # Обновляем кэш цен раз в час (3600 секунд)
+        if time.time() - OR_CACHE_TIME > 3600:
+            try:
+                req = urllib.request.Request("https://openrouter.ai/api/v1/models")
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    for model_info in data.get("data", []):
+                        OR_MODELS_CACHE[model_info["id"]] = {
+                            "prompt": float(model_info["pricing"]["prompt"]),
+                            "completion": float(model_info["pricing"]["completion"])
+                        }
+                OR_CACHE_TIME = time.time()
+                print(f"[LLM] Тарифы OpenRouter успешно обновлены ({len(OR_MODELS_CACHE)} моделей).", flush=True)
+            except Exception as e:
+                print(f"[LLM] Ошибка загрузки тарифов OpenRouter: {e}", flush=True)
+
+        # Считаем стоимость на основе нашего кэша
+        target_model = model_name.replace("openrouter/", "")
+        if target_model in OR_MODELS_CACHE:
+            pricing = OR_MODELS_CACHE[target_model]
+            return (p_tok * pricing["prompt"]) + (c_tok * pricing["completion"])
+        
+        return 0.0
+
+    # Фоллбэк на litellm для других провайдеров (на случай добавления платных)
     try:
-        p_tok, c_tok = 0, 0
-        if usage_obj:
-            if isinstance(usage_obj, dict):
-                p_tok = usage_obj.get('prompt_tokens', 0)
-                c_tok = usage_obj.get('completion_tokens', 0)
-            else:
-                p_tok = getattr(usage_obj, 'prompt_tokens', 0)
-                c_tok = getattr(usage_obj, 'completion_tokens', 0)
-                
-        return litellm.completion_cost(
-            model=model_name,
-            prompt_tokens=p_tok,
-            completion_tokens=c_tok
-        ) or 0.0
-    except Exception as e:
-        print(f"[LLM] Ошибка вычисления стоимости для {model_name}: {e}", flush=True)
+        dummy_resp = {
+            "model": model_name,
+            "usage": {
+                "prompt_tokens": p_tok,
+                "completion_tokens": c_tok
+            }
+        }
+        return litellm.completion_cost(completion_response=dummy_resp) or 0.0
+    except Exception:
         return 0.0
 
 async def generate_response(messages, system_prompt=None, tools=None, model_override=None, agent_name=None, user_id=None, task_id=None, stream_callback=None, is_cancelled=None, **extra_kwargs):
