@@ -1,0 +1,58 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-rita}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Порт 5432 убран. БД доступна только внутри Docker-сети.
+
+  core:
+    build: 
+      context: .
+      dockerfile: backend/core/Dockerfile
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - WORKSPACE_DIR=/workspace
+    depends_on:
+      - db
+    volumes:
+      - ./agent_workspace:/workspace
+    # Директивы ports нет. Изолирован.
+
+  tool_node:
+    build:
+      context: .
+      dockerfile: backend/tool_node/Dockerfile
+    restart: always
+    # УБРАЛИ env_file! Теперь агенты не смогут прочитать системные ключи командой 'env'
+    environment:
+      - WORKSPACE_DIR=/workspace
+    volumes:
+      - ./agent_workspace:/workspace
+    cap_add:
+      - SYS_ADMIN # Требуется ядру Linux для создания песочницы bwrap внутри контейнера
+    security_opt:
+      - apparmor:unconfined
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      # Наружу смотрит только Nginx, который раздает статику и проксирует /api и /ws
+      - "${EXTERNAL_PORT:-28204}:80"
+    depends_on:
+      - core
+
+volumes:
+  postgres_data:

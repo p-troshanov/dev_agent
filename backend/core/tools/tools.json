@@ -1,0 +1,585 @@
+[
+    {
+        "name": "message_user",
+        "category": "Интерфейс",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "message_user",
+                "description": "Написать сообщение пользователю (задать вопрос, отчитаться о выполнении или просто ответить). Этим инструментом нужно завершать задачу или приостанавливать для ответа.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "message": {
+                            "type": "string",
+                            "description": "Текст сообщения для пользователя."
+                        },
+                        "is_final": {
+                            "type": "boolean",
+                            "description": "Установите true, если задача полностью завершена, иначе false (если ждете ответа)."
+                        }
+                    },
+                    "required": [
+                        "message",
+                        "is_final"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "run_terminal",
+        "category": "Система",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "run_terminal",
+                "description": "Выполнить команду в терминале (bwrap/sandbox).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "Команда для выполнения (например: ls -la)"
+                        },
+                        "work_dir": {
+                            "type": "string",
+                            "description": "Рабочая директория"
+                        }
+                    },
+                    "required": [
+                        "command"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "read_file",
+        "category": "Файлы",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Прочитать содержимое файла.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Путь к файлу"
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "check_file_exists",
+        "category": "Файлы",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "check_file_exists",
+                "description": "Проверить существование файла или папки.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Относительный или абсолютный путь."
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "edit_file",
+        "category": "Файлы",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "edit_file",
+                "description": "Заменить часть текста в файле.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Относительный путь к файлу."
+                        },
+                        "search_string": {
+                            "type": "string",
+                            "description": "Точная строка для поиска."
+                        },
+                        "replace_string": {
+                            "type": "string",
+                            "description": "Строка для замены."
+                        }
+                    },
+                    "required": [
+                        "path",
+                        "search_string",
+                        "replace_string"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "write_file",
+        "category": "Файлы",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Перезаписать файл новым содержимым.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Путь к файлу"
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Новый текст файла."
+                        }
+                    },
+                    "required": [
+                        "path",
+                        "content"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "create_directory",
+        "category": "Файлы",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "create_directory",
+                "description": "Создать новую папку.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Путь к создаваемой папке."
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "attach_file",
+        "category": "Файлы",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "attach_file",
+                "description": "Прикрепить ссылку на файл.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Путь к файлу."
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "scan_project",
+        "category": "Код",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "scan_project",
+                "description": "Сканировать структуру проекта.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "work_dir": {
+                            "type": "string",
+                            "description": "Директория для сканирования."
+                        }
+                    },
+                    "required": []
+                }
+            }
+        }
+    },
+    {
+        "name": "restore_backup",
+        "category": "Код",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "restore_backup",
+                "description": "Восстановить бэкапы файлов.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "time_minutes": {
+                            "type": "integer",
+                            "description": "За сколько последних минут восстанавливать."
+                        }
+                    },
+                    "required": [
+                        "time_minutes"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "manage_background_service",
+        "category": "Система",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "manage_background_service",
+                "description": "Управление фоновыми процессами (запуск/остановка/статус).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "start",
+                                "stop",
+                                "status"
+                            ],
+                            "description": "Действие: start, stop, status"
+                        },
+                        "command": {
+                            "type": "string",
+                            "description": "Команда (только при action=start)"
+                        },
+                        "service_id": {
+                            "type": "string",
+                            "description": "ID процесса (при stop или status)"
+                        },
+                        "work_dir": {
+                            "type": "string",
+                            "description": "Рабочая директория."
+                        }
+                    },
+                    "required": [
+                        "action"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "get_service_logs",
+        "category": "Система",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "get_service_logs",
+                "description": "Получить логи фонового процесса.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "service_id": {
+                            "type": "string",
+                            "description": "ID процесса из manage_background_service."
+                        },
+                        "lines": {
+                            "type": "integer",
+                            "description": "Количество строк лога (по умолчанию 50)"
+                        }
+                    },
+                    "required": [
+                        "service_id"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "check_syntax",
+        "category": "Код",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "check_syntax",
+                "description": "Проверить синтаксис файла.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Путь к файлу."
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "install_dependencies",
+        "category": "Система",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "install_dependencies",
+                "description": "Установить зависимости.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "manager": {
+                            "type": "string",
+                            "enum": [
+                                "pip",
+                                "npm"
+                            ],
+                            "description": "Пакетный менеджер"
+                        },
+                        "packages": {
+                            "type": "string",
+                            "description": "Пакеты (или пусто для requirements/package.json)"
+                        },
+                        "work_dir": {
+                            "type": "string",
+                            "description": "Рабочая директория."
+                        }
+                    },
+                    "required": [
+                        "manager"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "view_file_diff",
+        "category": "Файлы",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "view_file_diff",
+                "description": "Просмотр разницы между текущим и прошлым бэкапом.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Путь к файлу."
+                        }
+                    },
+                    "required": [
+                        "path"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "manage_agent",
+        "category": "Агенты",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "manage_agent",
+                "description": "Управление агентами (создать/изменить/удалить).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "create",
+                                "update",
+                                "delete"
+                            ],
+                            "description": "Действие"
+                        },
+                        "agent_id": {
+                            "type": "integer",
+                            "description": "ID агента (для update и delete)"
+                        },
+                        "agent_data": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string"
+                                },
+                                "profession": {
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "type": "string"
+                                },
+                                "system_prompt": {
+                                    "type": "string"
+                                },
+                                "model": {
+                                    "type": "string"
+                                },
+                                "tools": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "settings": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "required": [
+                        "action"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "delegate_task",
+        "category": "Агенты",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "delegate_task",
+                "description": "Делегировать задачу другому агенту.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "agent_name": {
+                            "type": "string",
+                            "description": "Имя агента."
+                        },
+                        "instruction": {
+                            "type": "string",
+                            "description": "Инструкция."
+                        }
+                    },
+                    "required": [
+                        "agent_name",
+                        "instruction"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "github_sync",
+        "category": "Система",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "github_sync",
+                "description": "Синхронизация проекта с GitHub.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string",
+                            "enum": [
+                                "clone_or_pull",
+                                "push"
+                            ],
+                            "description": "Действие"
+                        },
+                        "project_id": {
+                            "type": "integer",
+                            "description": "ID проекта."
+                        },
+                        "commit_message": {
+                            "type": "string",
+                            "description": "Сообщение коммита (для push)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Ветка (по умолчанию main)."
+                        }
+                    },
+                    "required": [
+                        "action",
+                        "project_id"
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "name": "summarize_text",
+        "category": "Утилиты",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "summarize_text",
+                "description": "Суммаризация или форматирование большого текста с помощью LLM.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "Текст (или file_path)"
+                        },
+                        "format": {
+                            "type": "string",
+                            "description": "Формат (например, 'краткая выжимка', 'JSON формат')"
+                        },
+                        "file_path": {
+                            "type": "string",
+                            "description": "Путь к файлу"
+                        },
+                        "output_file": {
+                            "type": "string",
+                            "description": "Куда сохранить результат"
+                        }
+                    },
+                    "required": [
+                        "format"
+                    ]
+                }
+            }
+        }
+    }
+]
