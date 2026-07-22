@@ -27,7 +27,7 @@ def setup_task_workspace(user_id: int, task_id: int, work_dir: str) -> str:
             work_dir = os.path.normpath(os.path.join(base_user_dir, rel)).replace('\\', '/')
         elif not os.path.isabs(work_dir):
             work_dir = os.path.normpath(os.path.join(base_user_dir, work_dir)).replace('\\', '/')
-
+            
     if not work_dir or not work_dir.startswith(base_user_dir):
         work_dir = base_user_dir
         
@@ -39,6 +39,7 @@ def setup_task_workspace(user_id: int, task_id: int, work_dir: str) -> str:
         conn.commit()
         
     return work_dir
+
 
 def build_system_prompt(agent_name: str, user_id: int, work_dir: str, tools_desc_map: dict) -> str:
     real_base = os.path.abspath(os.path.join(BASE_WORKSPACE, f"user_{user_id}")).replace('\\', '/')
@@ -53,7 +54,14 @@ def build_system_prompt(agent_name: str, user_id: int, work_dir: str, tools_desc
                 fake_work = f"{fake_base}/{rel}"
                 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
+    
+    # --- ДИНАМИЧЕСКИЙ КОНТЕКСТ ОС ДЛЯ АГЕНТА ---
+    os_hint = ""
+    if os.name == 'nt':
+        os_hint = "5. ВАЖНО: Терминал работает в среде Windows (cmd.exe). Команды Linux (ls, rm, pwd) НЕ РАБОТАЮТ! Используйте аналоги Windows (dir, del, cd) или кроссплатформенные утилиты (git, python). Пути пишите в формате Linux (/workspace/...), система сама их переведет.\n"
+    else:
+        os_hint = "5. ВАЖНО: Терминал работает в среде Linux (bash).\n"
+        
     sys_prompt = (
         f"Вы автономный агент '{agent_name}'.\n"
         f"Текущее системное время: {current_time}\n"
@@ -64,8 +72,10 @@ def build_system_prompt(agent_name: str, user_id: int, work_dir: str, tools_desc
         f"2. Вы не можете выходить за пределы корневой папки {fake_base}.\n"
         "3. Внимательно читайте результаты выполнения команд и ошибки, исправляйте их.\n"
         "4. Вы ОБЯЗАНЫ в любом случае ответить пользователю, используя хотя бы один инструмент. Используйте 'message_user', чтобы задать вопрос (is_final=false) или завершить задачу (is_final=true).\n"
+        f"{os_hint}"
     )
     return sys_prompt
+
 
 def build_initial_messages(task_id: int, initial_prompt: str, is_continue: bool) -> list:
     messages = []
@@ -81,20 +91,21 @@ def build_initial_messages(task_id: int, initial_prompt: str, is_continue: bool)
                 
             time_str = created_at.strftime("%H:%M:%S") if hasattr(created_at, 'strftime') else ""
             ts_prefix = f"[{time_str}] " if time_str else ""
-                
+            
             if r_role == 'user':
                 messages.append({"role": "user", "content": f"{ts_prefix}{r_content}"})
             elif r_role == 'assistant':
                 messages.append({"role": "assistant", "content": f"{ts_prefix}{r_content or '(пустой ответ)'}"})
             elif r_role == 'tool':
-                messages.append({"role": "user", "content": f"{ts_prefix}Ответ инструмента ({r_agent}): {r_content}"})
+                messages.append({"role": "user", "content": f"{ts_prefix}Ответ ({r_agent}): {r_content}"})
                 
         current_time = datetime.now().strftime("%H:%M:%S")
-        messages.append({"role": "user", "content": f"[{current_time}] Новое указание: {initial_prompt}"})
+        messages.append({"role": "user", "content": f"[{current_time}] Продолжение: {initial_prompt}"})
     else:
         current_time = datetime.now().strftime("%H:%M:%S")
         messages.append({"role": "user", "content": f"[{current_time}] {initial_prompt}"})
     return messages
+
 
 def get_active_manager_tools(tools_map: dict) -> list:
     active_tools_schemas = []

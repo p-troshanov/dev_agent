@@ -25,8 +25,13 @@
         <div style="font-size: 11px; color: var(--text-muted); margin-top: -2px; display: flex; align-items: center; gap: 4px;">
           <span>🤖 Исполнитель:</span> <span style="color: var(--accent-blue); font-weight: 500;">{{ task.agent_name || 'Не назначен' }}</span>
         </div>
-        <div class="task-status" :class="task.status">
-          {{ formatStatus(task.status) }}
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div class="task-status" :class="task.status">
+            {{ formatStatus(task.status) }}
+          </div>
+          <div v-if="task.total_cost > 0" style="font-size: 11px; color: var(--warning); font-family: 'Consolas', monospace; font-weight: 600;" title="Расход на задачу">
+            ${{ task.total_cost.toFixed(4) }}
+          </div>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@
 import os
 import json
 import time
+import re
 import urllib.parse
 import urllib.request
 import subprocess
@@ -14,6 +15,11 @@ from backend.core.llm import generate_response
 
 BASE_WORKSPACE = os.getenv("WORKSPACE_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../workspace")))
 
+def _strip_zwsp(text: str) -> str:
+    if not isinstance(text, str):
+        return text
+    return re.sub(r'[\u200b\u200c\u200d\u200e\u200f\ufeff]', '', text)
+
 async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modified_file: str, last_backup_file: str, agent_id: int, user_id: int, task_id: int, tool_call_id: str, tool_settings: dict) -> dict:
     res = {
         "endpoint": None, "payload": {}, "result_str": "",
@@ -22,29 +28,34 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
     }
     
     if f_name == "run_terminal":
-        res["endpoint"], res["payload"] = "/api/terminal/run", {"command": args.get("command", ""), "work_dir": args.get("work_dir", work_dir), "user_id": user_id}
+        command = _strip_zwsp(args.get("command", ""))
+        res["endpoint"], res["payload"] = "/api/terminal/run", {"command": command, "work_dir": args.get("work_dir", work_dir), "user_id": user_id}
         
     elif f_name == "manage_background_service":
-        action = args.get("action", "status")
+        action = _strip_zwsp(args.get("action", "status"))
         t_work_dir = _resolve_path(args.get("work_dir", work_dir), work_dir, user_id)
         
         if action == "start":
-            res["endpoint"], res["payload"] = "/api/service/start", {"command": args.get("command"), "work_dir": t_work_dir, "user_id": user_id}
+            command = _strip_zwsp(args.get("command", ""))
+            res["endpoint"], res["payload"] = "/api/service/start", {"command": command, "work_dir": t_work_dir, "user_id": user_id}
         elif action == "stop":
-            res["endpoint"], res["payload"] = "/api/service/stop", {"service_id": args.get("service_id"), "user_id": user_id}
+            service_id = _strip_zwsp(args.get("service_id", ""))
+            res["endpoint"], res["payload"] = "/api/service/stop", {"service_id": service_id, "user_id": user_id}
         elif action == "status":
-            res["endpoint"], res["payload"] = "/api/service/status", {"service_id": args.get("service_id"), "user_id": user_id}
+            service_id = _strip_zwsp(args.get("service_id", ""))
+            res["endpoint"], res["payload"] = "/api/service/status", {"service_id": service_id, "user_id": user_id}
 
     elif f_name == "get_service_logs":
-        res["endpoint"], res["payload"] = "/api/service/logs", {"service_id": args.get("service_id"), "lines": args.get("lines", 50), "user_id": user_id}
+        service_id = _strip_zwsp(args.get("service_id", ""))
+        res["endpoint"], res["payload"] = "/api/service/logs", {"service_id": service_id, "lines": args.get("lines", 50), "user_id": user_id}
 
     elif f_name == "manage_agent":
         action = args.get("action")
         if not user_id:
-            res["result_str"] = "Ошибка: user_id не определен."
+            res["result_str"] = "Ошибка: user_id обязателен."
         elif action == "create":
             agent_data = args.get("agent_data", {})
-            name = agent_data.get("name", "Новый Агент")
+            name = agent_data.get("name", "Новый агент")
             description = agent_data.get("description", "")
             system_prompt = agent_data.get("system_prompt", "")
             model = agent_data.get("model", None)
@@ -60,9 +71,9 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                                   (user_id, name, description, model, system_prompt, "{}", json.dumps(tools_list), json.dumps(settings_obj), 0, 0))
                         new_id = c.fetchone()[0]
                     conn.commit()
-                res["result_str"] = f"Успешно создан агент '{name}' с ID: {new_id}"
+                res["result_str"] = f"Агент '{name}' успешно создан с ID: {new_id}"
             except Exception as e:
-                res["result_str"] = f"Ошибка БД: {e}"
+                res["result_str"] = f"Ошибка: {e}"
                 
         elif action == "update":
             upd_agent_id = args.get("agent_id")
@@ -77,7 +88,7 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                         if k in agent_data:
                             updates.append(f"{k} = %s")
                             params.append(agent_data[k])
-                            
+                                            
                     if "tools" in agent_data:
                         updates.append("tools = %s")
                         params.append(json.dumps(agent_data["tools"]))
@@ -99,7 +110,7 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                                     res["result_str"] = f"Агент ID {upd_agent_id} успешно обновлен."
                             conn.commit()
                 except Exception as e:
-                    res["result_str"] = f"Ошибка БД: {e}"
+                    res["result_str"] = f"Ошибка: {e}"
                     
         elif action == "delete":
             del_agent_id = args.get("agent_id")
@@ -111,12 +122,12 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                         with conn.cursor() as c:
                             c.execute("DELETE FROM agents WHERE id = %s AND user_id = %s", (del_agent_id, user_id))
                             if c.rowcount == 0:
-                                res["result_str"] = "Агент не найден."
+                                res["result_str"] = "Агент не найден или нет прав."
                             else:
                                 res["result_str"] = f"Агент ID {del_agent_id} удален."
                         conn.commit()
                 except Exception as e:
-                    res["result_str"] = f"Ошибка БД: {e}"
+                    res["result_str"] = f"Ошибка: {e}"
         else:
             res["result_str"] = f"Неизвестное действие '{action}'"
 
@@ -125,7 +136,7 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
         instruction = args.get("instruction", "")
         
         if not agent_target or not instruction:
-            res["result_str"] = "Необходимо указать agent_name и instruction."
+            res["result_str"] = "Укажите agent_name и instruction."
         else:
             with get_db() as conn:
                 with conn.cursor() as c:
@@ -133,7 +144,7 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                     row = c.fetchone()
             
             if not row:
-                res["result_str"] = f"Агент с именем '{agent_target}' не найден. Создайте его через manage_agent."
+                res["result_str"] = f"Агент '{agent_target}' не найден. Создайте его через manage_agent."
             else:
                 sub_agent_id, sub_desc, sub_prompt, sub_model, sub_tools, sub_settings, sub_profession = row
                 
@@ -166,7 +177,7 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                         rel = os.path.relpath(real_work, real_base).replace('\\', '/')
                         if rel != '.': fake_work = f"{fake_base}/{rel}"
                 
-                sub_sys_prompt = f"Роль: {sub_profession or 'Ассистент'} ('{agent_target}').\n{sub_prompt or ''}\n\nРабочая директория ({fake_work}). Обязательно используй инструмент 'finish_task' для возврата результата."
+                sub_sys_prompt = f"Ваша роль: {sub_profession or 'Помощник'} ('{agent_target}').\n{sub_prompt or ''}\n\nРабочая директория (песочница): {fake_work}. Обязательно вызовите 'finish_task' с результатами работы, когда закончите."
                 
                 sub_result = ""
                 sub_last_mod = last_modified_file
@@ -209,11 +220,11 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                             with open(debug_file_path, "w", encoding="utf-8") as f:
                                 json.dump(payload_to_save, f, ensure_ascii=False, indent=2)
                         except Exception as e:
-                            print(f"Ошибка сохранения debug-лога: {e}")
+                            print(f"Ошибка сохранения debug-файла: {e}")
 
                     resp = await generate_response(sub_messages, **kwargs)
                     if not resp or not resp.choices:
-                        sub_result = "Ошибка вызова LLM субагента (Rate limit или сбой API)."
+                        sub_result = "Ошибка вызова LLM субагента (Rate limit или API недоступно)."
                         llm_failed = True
                         break
                         
@@ -263,23 +274,23 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                                 
                         if abort_chain:
                             break
-                            
+                        
                     else:
-                        sub_result = sub_msg.content or "Пустой ответ без вызова инструментов."
+                        sub_result = sub_msg.content or ""
                         is_sub_finished = True
                         short_res = sub_result[:150].replace('\n', ' ')
                         if len(sub_result) > 150: short_res += "..."
-                        execution_trace.append(f"{len(execution_trace)+1}. **Текстовый ответ**: -> {short_res}")
+                        execution_trace.append(f"{len(execution_trace)+1}. **Ответ текстом**: -> {short_res}")
                         break
                         
                 if not is_sub_finished and not llm_failed:
-                    sub_result = "Субагент превысил лимит шагов (20) и не вызвал finish_task. Возможно, задача выполнена частично."
+                    sub_result = "Превышен лимит шагов (20) субагента без вызова finish_task. Работа прервана."
 
                 res["last_modified_file"] = sub_last_mod
                 res["last_backup_file"] = sub_last_bak
                 
-                trace_str = "\n".join(execution_trace) if execution_trace else "Нет действий."
-                res["result_str"] = f"Отчет от агента '{agent_target}':\n{sub_result}\n\n*--- Трассировка действий ---*\n{trace_str}"
+                trace_str = "\n".join(execution_trace) if execution_trace else "Нет шагов"
+                res["result_str"] = f"Отчет от субагента '{agent_target}':\n{sub_result}\n\n*--- Трассировка выполнения ---*\n{trace_str}"
 
     elif f_name == "github_sync":
         action = args.get("action")
@@ -288,7 +299,7 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
         branch = args.get("branch", "")
         
         if not project_id:
-            res["result_str"] = "Не указан project_id."
+            res["result_str"] = "Укажите project_id."
         else:
             github_token = None
             if user_id:
@@ -298,8 +309,9 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                         row = c.fetchone()
                         if row and row[0]: 
                             github_token = row[0]
+
             if not github_token:
-                res["result_str"] = "У пользователя не настроен GitHub Token (PAT). Настройте его в профиле."
+                res["result_str"] = "В настройках не указан GitHub Token (PAT). Добавьте его для работы с приватными репозиториями."
             else:
                 with get_db() as conn:
                     with conn.cursor() as c:
@@ -358,17 +370,20 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                                 
                             if res["result_str"]:
                                 res["result_str"] = res["result_str"].replace(github_token, "***GITHUB_TOKEN***")
+
                             if not res["result_str"] or res["result_str"].strip() == "":
-                                res["result_str"] = "Успешное выполнение Git операции без вывода."
+                                res["result_str"] = "Команда Git выполнена, но вывод пустой."
 
     elif f_name == "summarize_text":
         text_to_process = args.get("text", "")
         file_path = args.get("file_path", "")
+
         if text_to_process and len(text_to_process) < 255 and ("/" in text_to_process or "\\" in text_to_process):
             resolved_check = _resolve_path(text_to_process, work_dir, user_id)
             if os.path.isfile(resolved_check):
                 file_path = text_to_process
                 text_to_process = ""
+
         if file_path:
             resolved_txt_path = _resolve_path(file_path, work_dir, user_id)
             if os.path.isfile(resolved_txt_path):
@@ -377,9 +392,11 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                         text_to_process = f.read()
                 except Exception as e:
                     pass
-        format_req = args.get("format", "Сделай краткую выжимку")
-        sys_prompt = f"Твоя задача обработать текст. Формат: {format_req}. Верни ТОЛЬКО результат без лишних слов."
+
+        format_req = args.get("format", "Сводка")
+        sys_prompt = f"Сделай суммаризацию текста. Формат: {format_req}. Отвечай только выжимкой, без лишних вступлений."
         messages = [{"role": "user", "content": text_to_process[:25000]}]
+
         try:
             resp = await generate_response(messages, system_prompt=sys_prompt, model_override=None, agent_name="Summarizer", user_id=user_id, task_id=task_id)
             if resp and resp.choices:
@@ -393,9 +410,9 @@ async def execute_system_tool(f_name: str, args: dict, work_dir: str, last_modif
                         out_f.write(res["result_str"])
                     res["result_str"] = f"Результат сохранен в файл: {out_path}"
             else:
-                res["result_str"] = "Ошибка получения ответа от LLM для суммаризации."
+                res["result_str"] = "Ошибка вызова LLM для суммаризации."
         except Exception as e:
-            res["result_str"] = f"Ошибка вызова LLM: {e}"
+            res["result_str"] = f"Ошибка LLM: {e}"
 
     elif f_name == "finish_task":
         res["result_str"] = args.get("final_report", "Задача завершена.")

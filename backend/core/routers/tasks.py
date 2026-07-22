@@ -4,6 +4,7 @@ import os
 import zipfile
 import io
 import re
+
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Depends
 from backend.core.database import get_db
 from backend.core.schemas import TaskCreate, TaskToolConfirm, TaskToolResponse
@@ -17,8 +18,10 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 BASE_WORKSPACE = os.getenv("WORKSPACE_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../workspace")))
 
+
 class TaskContinue(BaseModel):
     prompt: str
+
 
 @router.get("")
 def get_tasks(current_user: dict = Depends(get_current_user)):
@@ -26,26 +29,32 @@ def get_tasks(current_user: dict = Depends(get_current_user)):
     with get_db() as conn:
         with conn.cursor() as c:
             c.execute('''
-                SELECT t.id, t.title, p.name as project_name, t.status, t.created_at, t.agent_id, a.name, t.work_dir, t.auto_approve_tools
+                SELECT t.id, t.title, p.name as project_name, t.status, t.created_at, 
+                       t.agent_id, a.name, t.work_dir, t.auto_approve_tools, 
+                       COALESCE(SUM(ls.cost), 0.0) as total_cost
                 FROM tasks t
                 LEFT JOIN agents a ON t.agent_id = a.id
                 LEFT JOIN projects p ON t.project_id = p.id
+                LEFT JOIN llm_statistics ls ON t.id = ls.task_id
                 WHERE t.user_id = %s
+                GROUP BY t.id, p.id, a.id
                 ORDER BY t.id DESC
             ''', (user_id,))
             return [
                 {
                     "id": r[0], 
                     "title": r[1], 
-                    "project_name": r[2] or "Не привязан",
+                    "project_name": r[2] or "",
                     "status": r[3], 
                     "created_at": r[4],
                     "agent_id": r[5],
-                    "agent_name": r[6] or "Неизвестный агент",
+                    "agent_name": r[6] or "",
                     "work_dir": r[7] or "",
-                    "auto_approve_tools": bool(r[8])
+                    "auto_approve_tools": bool(r[8]),
+                    "total_cost": float(r[9])
                 } for r in c.fetchall()
             ]
+
 
 @router.post("")
 async def create_task(data: TaskCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
@@ -59,6 +68,7 @@ async def create_task(data: TaskCreate, background_tasks: BackgroundTasks, curre
                 p_row = c.fetchone()
                 if p_row and p_row[0]:
                     target_work_dir = p_row[0].replace('\\', '/')
+
             auto_approve_val = 1 if data.auto_approve_tools else 0
             c.execute('INSERT INTO tasks (user_id, title, project_id, status, agent_id, work_dir, is_cancelled, auto_approve_tools) VALUES (%s, %s, %s, %s, %s, %s, 0, %s) RETURNING id',
                        (user_id, data.title, data.project_id, 'pending', data.agent_id, target_work_dir, auto_approve_val))
@@ -66,11 +76,12 @@ async def create_task(data: TaskCreate, background_tasks: BackgroundTasks, curre
             
             c.execute('''INSERT INTO task_logs (task_id, role, content, agent_name)
                           VALUES (%s, %s, %s, %s)''',
-                      (task_id, 'user', data.initial_prompt, 'Пользователь'))
+                      (task_id, 'user', data.initial_prompt, ''))
         conn.commit()
         
     background_tasks.add_task(run_task, task_id, data.initial_prompt, False, user_id)
     return {"status": "ok", "id": task_id}
+
 
 @router.post("/{task_id}/continue")
 async def continue_task(task_id: int, data: TaskContinue, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
@@ -80,11 +91,12 @@ async def continue_task(task_id: int, data: TaskContinue, background_tasks: Back
             c.execute('UPDATE tasks SET status = %s, is_cancelled = 0 WHERE id = %s AND user_id = %s', ('pending', task_id, user_id))
             c.execute('''INSERT INTO task_logs (task_id, role, content, agent_name)
                           VALUES (%s, %s, %s, %s)''',
-                      (task_id, 'user', data.prompt, 'Пользователь'))
+                      (task_id, 'user', data.prompt, ''))
         conn.commit()
         
     background_tasks.add_task(run_task, task_id, data.prompt, True, user_id)
     return {"status": "ok"}
+
 
 @router.get("/{task_id}/logs")
 def get_task_logs(task_id: int, current_user: dict = Depends(get_current_user)):
@@ -110,6 +122,7 @@ def get_task_logs(task_id: int, current_user: dict = Depends(get_current_user)):
                     "pending_approval": bool(r[6])
                 } for r in logs
             ]
+
 
 @router.get("/{task_id}/context_export")
 def export_task_context(task_id: int, current_user: dict = Depends(get_current_user)):
@@ -143,7 +156,7 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
     tools_by_category = {}
     tools_map = {}
     for t_name, t_desc, t_cat, t_schema in all_tools:
-        cat = t_cat or "Без категории"
+        cat = t_cat or "Системные"
         if cat not in tools_by_category:
             tools_by_category[cat] = []
         tools_by_category[cat].append(f"{t_name} - {t_desc}")
@@ -159,6 +172,7 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
 
     real_base = os.path.abspath(os.path.join(BASE_WORKSPACE, f"user_{user_id}")).replace('\\', '/')
     fake_base = f"/workspace/user_{user_id}"
+
     fake_work = fake_base
     if t_work_dir:
         real_work = t_work_dir.replace('\\', '/')
@@ -167,13 +181,13 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
             if rel != '.':
                 fake_work = f"{fake_base}/{rel}"
 
-    dir_info = f"\n\nТекущая рабочая директория: {fake_work}\nКорневая папка (sandbox) пользователя: {fake_base}." if fake_work else ""
+    dir_info = f"\n\nРабочая директория задачи: {fake_work}\nАбсолютный корень (sandbox) пользователя: {fake_base}." if fake_work else ""
     
     sys_prompt = (
-        f"Роль агента '{agent_name or 'Ассистент'}'. "
-        "Вам доступны системные инструменты для работы с кодом и проектом. "
-        "Обязательно отвечайте в JSON формате если инструмент того требует. "
-        "Обязательно используйте 'finish_task', когда работа закончена."
+        f"Ты системный агент '{agent_name or 'Основной'}'. "
+        "Тебе предоставлена история выполнения задачи. "
+        "Инструменты переданы в формате JSON, если они требуются. "
+        "Используй 'finish_task', если задача завершена."
         f"{dir_info}"
     )
 
@@ -204,7 +218,7 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
                                 requested_tool_names.add(item)
                         has_tool_request = True
             elif r_role == 'tool':
-                messages.append({"role": "user", "content": f"Результат ({r_agent}): {r_content}"})
+                messages.append({"role": "user", "content": f"Ответ инструмента ({r_agent}): {r_content}"})
                 if r_agent:
                     m = re.search(r'\((.*?)\)', r_agent)
                     if m:
@@ -221,6 +235,7 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
     if has_tool_request:
         if "finish_task" not in requested_tool_names:
             requested_tool_names.add("finish_task")
+
         active_schemas = []
         for name in requested_tool_names:
             if name in tools_map:
@@ -235,6 +250,7 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
     headers = {"Content-Disposition": f"attachment; filename=task_payload_{task_id}.json"}
     return Response(content=output, media_type="application/json; charset=utf-8", headers=headers)
 
+
 @router.get("/{task_id}/debug_export")
 def export_task_debug(task_id: int, current_user: dict = Depends(get_current_user)):
     user_id = current_user["id"]
@@ -242,7 +258,7 @@ def export_task_debug(task_id: int, current_user: dict = Depends(get_current_use
     debug_dir = os.path.join(base_user_dir, ".debug", f"task_{task_id}").replace('\\', '/')
     
     if not os.path.exists(debug_dir) or not os.listdir(debug_dir):
-        raise HTTPException(status_code=404, detail="Нет данных для отладки")
+        raise HTTPException(status_code=404, detail="Отладочные логи для этой задачи не найдены.")
         
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -256,6 +272,7 @@ def export_task_debug(task_id: int, current_user: dict = Depends(get_current_use
     zip_buffer.seek(0)
     headers = {"Content-Disposition": f"attachment; filename=task_debug_{task_id}.zip"}
     return Response(content=zip_buffer.getvalue(), media_type="application/zip", headers=headers)
+
 
 @router.post("/{task_id}/cancel")
 def cancel_task(task_id: int, current_user: dict = Depends(get_current_user)):
@@ -272,6 +289,7 @@ def cancel_task(task_id: int, current_user: dict = Depends(get_current_user)):
             
     return {"status": "ok"}
 
+
 @router.post("/{task_id}/approve_tool")
 def approve_task_tool(task_id: int, data: TaskToolConfirm, current_user: dict = Depends(get_current_user)):
     future = state.pending_task_tools.get(data.tool_call_id)
@@ -284,6 +302,7 @@ def approve_task_tool(task_id: int, data: TaskToolConfirm, current_user: dict = 
         conn.commit()
         
     return {"status": "ok"}
+
 
 @router.post("/{task_id}/submit_tool_response")
 def submit_task_tool_response(task_id: int, data: TaskToolResponse, current_user: dict = Depends(get_current_user)):

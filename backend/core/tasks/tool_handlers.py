@@ -3,6 +3,7 @@ import json
 import asyncio
 import os
 import shutil
+
 from backend.core.database import get_db
 from backend.core.state import state
 from backend.core.tasks.tools_impl.utils import _call_tool_node, _hide_host_path
@@ -47,11 +48,11 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
             
         await state.broadcast_ws({"type": "TASK_UPDATED", "task_id": task_id}, user_id)
         
-        warning_msg = f"Инструмент требует подтверждения: {f_name}"
+        warning_msg = f"Требуется подтверждение для: {f_name}"
         if f_name in ["run_terminal", "manage_background_service"]:
-            warning_msg = f"Запрос на выполнение команды:\n`{args.get('command', '')}`\n\nРазрешить?"
+            warning_msg = f"Требуется подтверждение команды:\n`{args.get('command', '')}`\n\nРазрешить выполнение?"
         elif f_name in ["ask_user", "message_user"]:
-            warning_msg = f"Сообщение от агента:\n**{args.get('question', args.get('message', 'Пустое сообщение.'))}**"
+            warning_msg = f"Агент хочет отправить сообщение:\n**{args.get('question', args.get('message', 'Пусто.'))}**"
             
         approval_payload = {
             "is_plugin_request": True,
@@ -63,7 +64,7 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
         with get_db() as conn:
             with conn.cursor() as c:
                 c.execute('''INSERT INTO task_logs (task_id, role, content, agent_name, tool_call_id, pending_approval)
-                              VALUES (%s, %s, %s, %s, %s, %s)''', (task_id, "tool", json.dumps(approval_payload, ensure_ascii=False), f"Система ({f_name})", tool_call_id, 1))
+                              VALUES (%s, %s, %s, %s, %s, %s)''', (task_id, "tool", json.dumps(approval_payload, ensure_ascii=False), f"Запрос ({f_name})", tool_call_id, 1))
             conn.commit()
             
         future = asyncio.Future()
@@ -86,7 +87,7 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
             if isinstance(approved, str):
                 return {"result_str": f"Ответ пользователя: {approved}", "abort_subsequent_tools": False}
             else:
-                return {"result_str": "[Игнорировано]. Пользователь отклонил запрос.", "abort_subsequent_tools": False}
+                return {"result_str": "[Система] Пользователь прервал действие.", "abort_subsequent_tools": False}
                 
         if isinstance(approved, str):
             try:
@@ -102,7 +103,7 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
                 approved = True
                 
         if not approved:
-            return {"result_str": "[Отменено пользователем]. Инструмент не выполнен.", "abort_subsequent_tools": False}
+            return {"result_str": "[Система] Пользователь отклонил выполнение инструмента.", "abort_subsequent_tools": False}
 
     tool_settings = {}
     if user_id:
@@ -152,8 +153,8 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
         except:
             result_str = raw_result
             
-        if f_name in ["write_file", "edit_file"] and "успешно" not in result_str and "ok" not in result_str and "error" not in result_str.lower():
-            result_str += f"\n\n[Система]: Редактирование применено к файлу: {file_path}"
+        if f_name in ["write_file", "edit_file"] and "Успешно" not in result_str and "ok" not in result_str and "error" not in result_str.lower():
+            result_str += f"\n\n[Система] Файл сохранен: {file_path}"
             
         if f_name in ["run_terminal", "install_dependencies", "check_syntax"]:
             lower_res = result_str.lower()
@@ -168,10 +169,10 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
                 
             if not has_error:
                 has_error = any(err in lower_res for err in [
-                    "traceback (most recent call last):", 
+                    "traceback (most recent call last):",
                     "modulenotfounderror:",
-                    "syntaxerror:", 
-                    "fatal error:", 
+                    "syntaxerror:",
+                    "fatal error:",
                     "exception:"
                 ])
                 
@@ -179,16 +180,21 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
                 if last_modified_file and last_backup_file and os.path.exists(last_backup_file):
                     try:
                         shutil.copy2(last_backup_file, last_modified_file)
-                        result_str += f"\n\n[Система] Авто-откат применен. Предыдущая версия {last_modified_file} восстановлена из бэкапа."
+                        result_str += f"\n\n[Система] Файл {last_modified_file} восстановлен из бэкапа из-за ошибки."
                     except Exception:
                         pass
-                result_str += "\n\n[Система] Выполнение прервано из-за ошибки в скрипте (или неудачного pip install). Если вы делали 'write_file'/'edit_file', исправьте синтаксис."
+                
+                if f_name == "run_terminal":
+                    result_str += "\n\n[Система] Команда завершилась с ошибкой. Проанализируйте вывод консоли и исправьте проблему (например, очистите целевую директорию)."
+                else:
+                    result_str += "\n\n[Система] Выполнение прервано из-за ошибки в скрипте (или неудачного pip install). Если вы делали 'write_file'/'edit_file', исправьте синтаксис."
+                
                 abort_subsequent_tools = True
 
     if f_name not in ["run_terminal", "install_dependencies", "check_syntax"] and (result_str.startswith("Ошибка:") or result_str.startswith("Error:") or result_str.startswith("Exception:")):
         abort_subsequent_tools = True
         
-    # Маскируем абсолютные пути для LLM
+    # Скрываем реальные пути от LLM
     result_str = _hide_host_path(result_str, user_id)
     
     if last_modified_file: last_modified_file = last_modified_file.replace('\\', '/')
