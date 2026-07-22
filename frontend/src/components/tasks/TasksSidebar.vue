@@ -29,8 +29,8 @@
           <div class="task-status" :class="task.status">
             {{ formatStatus(task.status) }}
           </div>
-          <div v-if="task.total_cost > 0" style="font-size: 11px; color: var(--warning); font-family: 'Consolas', monospace; font-weight: 600;" title="Расход на задачу">
-            ${{ task.total_cost.toFixed(4) }}
+          <div v-if="task.total_cost !== undefined" style="font-size: 11px; color: var(--warning); font-family: 'Consolas', monospace; font-weight: 600;" title="Расход на задачу">
+            ${{ task.total_cost.toFixed(6) }}
           </div>
         </div>
       </div>

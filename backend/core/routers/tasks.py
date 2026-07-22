@@ -18,10 +18,8 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 BASE_WORKSPACE = os.getenv("WORKSPACE_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../workspace")))
 
-
 class TaskContinue(BaseModel):
     prompt: str
-
 
 @router.get("")
 def get_tasks(current_user: dict = Depends(get_current_user)):
@@ -55,7 +53,6 @@ def get_tasks(current_user: dict = Depends(get_current_user)):
                 } for r in c.fetchall()
             ]
 
-
 @router.post("")
 async def create_task(data: TaskCreate, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     user_id = current_user["id"]
@@ -82,7 +79,6 @@ async def create_task(data: TaskCreate, background_tasks: BackgroundTasks, curre
     background_tasks.add_task(run_task, task_id, data.initial_prompt, False, user_id)
     return {"status": "ok", "id": task_id}
 
-
 @router.post("/{task_id}/continue")
 async def continue_task(task_id: int, data: TaskContinue, background_tasks: BackgroundTasks, current_user: dict = Depends(get_current_user)):
     user_id = current_user["id"]
@@ -96,7 +92,6 @@ async def continue_task(task_id: int, data: TaskContinue, background_tasks: Back
         
     background_tasks.add_task(run_task, task_id, data.prompt, True, user_id)
     return {"status": "ok"}
-
 
 @router.get("/{task_id}/logs")
 def get_task_logs(task_id: int, current_user: dict = Depends(get_current_user)):
@@ -122,7 +117,6 @@ def get_task_logs(task_id: int, current_user: dict = Depends(get_current_user)):
                     "pending_approval": bool(r[6])
                 } for r in logs
             ]
-
 
 @router.get("/{task_id}/context_export")
 def export_task_context(task_id: int, current_user: dict = Depends(get_current_user)):

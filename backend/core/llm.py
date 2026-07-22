@@ -10,7 +10,6 @@ import litellm
 from backend.core.database import get_db
 
 litellm.suppress_debug_info = True
-
 os.environ["OR_SITE_URL"] = "https://app.jetplan.site/"
 os.environ["OR_APP_NAME"] = "RITA Core"
 
@@ -27,7 +26,7 @@ def get_keys_from_db(provider: str, user_id: int) -> list:
                 c.execute("SELECT id, api_key FROM api_keys WHERE provider = %s AND user_id = %s", (provider, user_id))
                 return [{"id": row[0], "key": row[1]} for row in c.fetchall()]
     except Exception as e:
-        print(f"Ошибка БД при чтении ключей: {e}", flush=True)
+        print(f"Ошибка получения ключей из БД: {e}", flush=True)
         return []
 
 def log_llm_request(provider: str, key_id: int, model: str, tokens: int, agent_name: str = None, user_id: int = None, cost: float = 0.0, task_id: int = None):
@@ -42,7 +41,7 @@ def log_llm_request(provider: str, key_id: int, model: str, tokens: int, agent_n
                 )
             conn.commit()
     except Exception as e:
-        print(f"Ошибка логирования статистики LLM: {e}", flush=True)
+        print(f"Ошибка записи статистики LLM: {e}", flush=True)
 
 def parse_groq_cooldown(error_str: str) -> float:
     match = re.search(r'try again in (?:(\d+)m)?([\d\.]+)s', error_str)
@@ -51,6 +50,35 @@ def parse_groq_cooldown(error_str: str) -> float:
         secs = float(match.group(2))
         return mins * 60 + secs
     return 600
+
+def _extract_total_tokens(usage_obj):
+    if not usage_obj:
+        return 0
+    if isinstance(usage_obj, dict):
+        return usage_obj.get('total_tokens', 0)
+    return getattr(usage_obj, 'total_tokens', 0)
+
+def _calculate_cost(provider, model_name, usage_obj):
+    if provider in ["groq", "gemini"]:
+        return 0.0
+    try:
+        p_tok, c_tok = 0, 0
+        if usage_obj:
+            if isinstance(usage_obj, dict):
+                p_tok = usage_obj.get('prompt_tokens', 0)
+                c_tok = usage_obj.get('completion_tokens', 0)
+            else:
+                p_tok = getattr(usage_obj, 'prompt_tokens', 0)
+                c_tok = getattr(usage_obj, 'completion_tokens', 0)
+                
+        return litellm.completion_cost(
+            model=model_name,
+            prompt_tokens=p_tok,
+            completion_tokens=c_tok
+        ) or 0.0
+    except Exception as e:
+        print(f"[LLM] Ошибка вычисления стоимости для {model_name}: {e}", flush=True)
+        return 0.0
 
 async def generate_response(messages, system_prompt=None, tools=None, model_override=None, agent_name=None, user_id=None, task_id=None, stream_callback=None, is_cancelled=None, **extra_kwargs):
     full_messages = []
@@ -64,7 +92,6 @@ async def generate_response(messages, system_prompt=None, tools=None, model_over
         {"provider": "openrouter", "name": "openrouter/meta-llama/llama-3.1-8b-instruct"},
         {"provider": "gemini", "name": "gemini/gemini-3.1-flash"}
     ]
-
     model_pipeline = []
     
     if model_override:
@@ -102,7 +129,6 @@ async def generate_response(messages, system_prompt=None, tools=None, model_over
         api_kwargs.update(extra_kwargs)
         
         keys_data = get_keys_from_db(provider, user_id)
-
         if not keys_data:
             env_key = os.getenv(f"{provider.upper()}_API_KEY")
             if env_key:
@@ -112,7 +138,6 @@ async def generate_response(messages, system_prompt=None, tools=None, model_over
             continue
             
         success = False
-
         for idx, key_info in enumerate(keys_data):
             key = key_info["key"]
             key_id = key_info["id"]
@@ -130,27 +155,26 @@ async def generate_response(messages, system_prompt=None, tools=None, model_over
                     
                     if stream_callback:
                         reconstructed = await _handle_stream(response, stream_callback, is_cancelled)
-                        tokens = getattr(reconstructed.usage, 'total_tokens', 0) if hasattr(reconstructed, 'usage') and reconstructed.usage else 0
-                        try: 
-                            if provider in ["groq", "gemini"]: cost = 0.0
-                            else: cost = litellm.completion_cost(completion_response=reconstructed) or 0.0
-                        except: cost = 0.0
-                        log_llm_request(provider, key_id, model_name, tokens, agent_name, user_id, cost, task_id)
+                        usage_obj = getattr(reconstructed, 'usage', None)
+                        
+                        t_tok = _extract_total_tokens(usage_obj)
+                        cost = _calculate_cost(provider, model_name, usage_obj)
+                        
+                        log_llm_request(provider, key_id, model_name, t_tok, agent_name, user_id, cost, task_id)
                         return reconstructed
                         
-                    tokens = getattr(response.usage, 'total_tokens', 0) if hasattr(response, 'usage') and response.usage else 0
-                    try: 
-                        if provider in ["groq", "gemini"]: cost = 0.0
-                        else: cost = litellm.completion_cost(completion_response=response) or 0.0
-                    except: cost = 0.0
-                    log_llm_request(provider, key_id, model_name, tokens, agent_name, user_id, cost, task_id)
+                    usage_obj = getattr(response, 'usage', None)
+                    t_tok = _extract_total_tokens(usage_obj)
+                    cost = _calculate_cost(provider, model_name, usage_obj)
+                    
+                    log_llm_request(provider, key_id, model_name, t_tok, agent_name, user_id, cost, task_id)
                     
                     success = True
                     return response
                     
                 except Exception as e:
                     error_str = str(e).lower()
-                    print(f"Ошибка [LLM] при вызове {provider} ({model_name}) попытка {attempt+1}/{max_retries}: {e}", flush=True)
+                    print(f"Ошибка [LLM] Провайдер {provider} ({model_name}) попытка {attempt+1}/{max_retries}: {e}", flush=True)
                     
                     if provider == "groq":
                         if "rate limit" in error_str or "429" in error_str:
@@ -169,21 +193,19 @@ async def generate_response(messages, system_prompt=None, tools=None, model_over
                             else:
                                 key_cooldowns["openrouter"][key] = time.time() + 60
                                 break
-                    
+                                
                     if attempt < max_retries - 1:
                         await asyncio.sleep(3)
                         continue
                     else:
                         break
-                
+                        
             if success:
-                 break
-                 
+                break
         if success:
             break
             
-        print("Ошибка [LLM] Все ключи или попытки исчерпаны для провайдера, fallback на следующий.", flush=True)
-
+    print("Все провайдеры исчерпаны, fallback не удался.", flush=True)
     return None
 
 async def _handle_stream(response_stream, stream_callback, is_cancelled=None):
@@ -197,8 +219,7 @@ async def _handle_stream(response_stream, stream_callback, is_cancelled=None):
             
         if hasattr(chunk, 'usage') and chunk.usage:
             usage = chunk.usage
-
-        if not getattr(chunk, "choices", None): 
+        if not getattr(chunk, "choices", None):
             continue
             
         delta = chunk.choices[0].delta
@@ -229,19 +250,15 @@ async def _handle_stream(response_stream, stream_callback, is_cancelled=None):
     class MockFunc:
         def __init__(self, name, arguments):
             self.name, self.arguments = name, arguments
-
     class MockTC:
         def __init__(self, id, func):
             self.id, self.function = id, func
-
     class MockMsg:
         def __init__(self, content, tcs):
             self.content, self.tool_calls = content, tcs
-
     class MockChoice:
         def __init__(self, msg):
             self.message = msg
-
     class MockResp:
         def __init__(self, choices, usage):
             self.choices = choices
@@ -257,12 +274,12 @@ def extract_json(text: str) -> Any:
     text = text.strip()
     try: return json.loads(text)
     except Exception: pass
-        
+    
     try:
         match = re.search(r'`{3}(?:json)?\s*(.*?)\s*`{3}', text, re.DOTALL)
         if match: return json.loads(match.group(1))
     except Exception: pass
-        
+    
     try:
         start_idx = text.find('[')
         end_idx = text.rfind(']')
@@ -276,5 +293,5 @@ def extract_json(text: str) -> Any:
         if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
             return json.loads(text[start_idx:end_idx+1])
     except Exception: pass
-        
+    
     return {}
