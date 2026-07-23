@@ -43,3 +43,6 @@ class ToolUpdate(BaseModel):
 class FileRW(BaseModel):
     path: str
     content: str = ""
+
+class ManualActionRequest(BaseModel):
+    action: str

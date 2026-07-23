@@ -5,6 +5,7 @@ import time
 import os
 import traceback
 from datetime import datetime
+
 from backend.core.database import get_db
 from backend.core.llm import generate_response
 from backend.core.state import state
@@ -14,7 +15,7 @@ from backend.core.tasks.runner_db import log_task_action, update_task_status, is
 BASE_WORKSPACE = os.getenv("WORKSPACE_DIR", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../workspace")))
 
 async def run_task_loop(
-    task_id: int, user_id: int, messages: list, sys_prompt: str,
+    task_id: int, user_id: int, messages: list, sys_prompt: str, 
     agent_name: str, agent_model: str, agent_settings: dict, 
     work_dir: str, active_tools_schemas: list, agent_id: int
 ):
@@ -36,7 +37,7 @@ async def run_task_loop(
         
         if is_task_cancelled(task_id):
             print(f"[RUNNER LOOP] Задача {task_id} отменена.", flush=True)
-            log_task_action(task_id, "system", "Задача отменена.", "")
+            log_task_action(task_id, "system", "Задача отменена пользователем.", "")
             update_task_status(task_id, 'failed')
             break
             
@@ -68,12 +69,12 @@ async def run_task_loop(
         except Exception as e:
             print(f"Ошибка сохранения debug-файла: {e}")
 
-        print(f"[RUNNER LOOP] Запрос к LLM...", flush=True)
+        print(f"[RUNNER LOOP] Ожидание ответа LLM...", flush=True)
         response = await generate_response(messages, **kwargs)
         
         if not response or not response.choices:
-            print(f"[RUNNER LOOP] Пустой ответ от LLM (Rate Limit или падение API).", flush=True)
-            log_task_action(task_id, "assistant", "Получен пустой ответ от LLM (Rate Limit или падение API).", agent_name)
+            print(f"[RUNNER LOOP] Пустой ответ LLM (Rate Limit или ошибка API).", flush=True)
+            log_task_action(task_id, "assistant", "Ошибка вызова LLM (Rate Limit или сбой API).", agent_name)
             update_task_status(task_id, 'failed')
             break
             
@@ -88,13 +89,13 @@ async def run_task_loop(
             recent_actions.pop(0)
             
         if len(recent_actions) == 3 and recent_actions[0] == recent_actions[1] == recent_actions[2]:
-            print(f"[RUNNER LOOP] Зацикливание LLM! Требуется вмешательство.", flush=True)
+            print(f"[RUNNER LOOP] Обнаружено зацикливание LLM! Приостановка.", flush=True)
             update_task_status(task_id, 'waiting_user')
             await state.broadcast_ws({"type": "TASK_UPDATED", "task_id": task_id}, user_id)
             
-            warning_msg = "Замечено зацикливание агента (повторение одних и тех же действий 3 раза подряд). Задача приостановлена для вашего вмешательства."
+            warning_msg = "Замечено зацикливание агента (3 одинаковых действия подряд). Проверьте результат и направьте его."
             fake_tc_id = f"loop_guard_{int(time.time())}"
-            log_task_action(task_id, "tool", warning_msg, "Система (Защита от цикла)", fake_tc_id, pending_approval=1)
+            log_task_action(task_id, "tool", warning_msg, "Система (Защита от циклов)", fake_tc_id, pending_approval=1)
             
             future = asyncio.Future()
             state.pending_task_tools[fake_tc_id] = future
@@ -106,15 +107,15 @@ async def run_task_loop(
                     del state.pending_task_tools[fake_tc_id]
                     
             if not approved:
-                print(f"[RUNNER LOOP] Пользователь отменил задачу.", flush=True)
-                log_task_action(task_id, "system", "Задача отменена.", "")
+                print(f"[RUNNER LOOP] Отменено пользователем.", flush=True)
+                log_task_action(task_id, "system", "Остановлено пользователем.", "")
                 update_task_status(task_id, 'failed')
                 await state.broadcast_ws({"type": "TASK_UPDATED", "task_id": task_id}, user_id)
                 break
             else:
-                reminder = f"[{datetime.now().strftime('%H:%M:%S')}] [Инструкция пользователя]:\n{approved}"
+                reminder = f"[{datetime.now().strftime('%H:%M:%S')}] [Комментарий пользователя]:\n{approved}"
                 log_task_action(task_id, "system", reminder, "")
-                messages.append({"role": "assistant", "content": (message.content or "Вызван инструмент...")})
+                messages.append({"role": "assistant", "content": (message.content or "Вызов инструмента...")})
                 messages.append({"role": "user", "content": reminder})
                 
                 update_task_status(task_id, 'running')
@@ -122,7 +123,13 @@ async def run_task_loop(
                 recent_actions.clear()
                 continue
 
+        has_tools = False
+        loop_should_break = False
+        should_exit_runner = False
+        task_failed_due_to_error_loop = [False]
+
         if hasattr(message, 'tool_calls') and message.tool_calls:
+            has_tools = True
             print(f"[RUNNER LOOP] Получены tool_calls от LLM: {[tc.function.name for tc in message.tool_calls]}", flush=True)
             ts_prefix = f"[{datetime.now().strftime('%H:%M:%S')}] "
             assistant_msg = {"role": "assistant", "content": f"{ts_prefix}{message.content}" if message.content else "", "tool_calls": []}
@@ -135,14 +142,14 @@ async def run_task_loop(
                     "id": tc.id, "type": "function",
                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}
                 })
+
             messages.append(assistant_msg)
             
             abort_subsequent_tools = [False]
-            task_failed_due_to_error_loop = [False]
             
             async def process_single_tc(tc):
                 if abort_subsequent_tools[0] or is_task_cancelled(task_id):
-                    return tc, "[Выполнение остановлено].", False
+                    return tc, "[Прервано из-за ошибки в предыдущем инструменте или отмены].", False
 
                 f_name = tc.function.name
                 try: 
@@ -156,12 +163,12 @@ async def run_task_loop(
                     is_final = args.get("is_final", False)
                     if f_name == "finish_task" or (is_final and str(is_final).lower() != "false"):
                         return tc, args.get("final_report", args.get("message", "Задача завершена.")), True
-                
-                print(f"[RUNNER LOOP] Запуск {f_name} с аргументами: {args}", flush=True)
+                        
+                print(f"[RUNNER LOOP] Вызов {f_name} с аргументами: {args}", flush=True)
                 
                 try:
                     res = await handle_tool_call(
-                        f_name, args, work_dir, last_modified_file, last_backup_file,
+                        f_name, args, work_dir, last_modified_file, last_backup_file, 
                         agent_id, user_id, task_id=task_id, tool_call_id=tc.id
                     )
                 except Exception as e:
@@ -176,21 +183,19 @@ async def run_task_loop(
 
                 return tc, res_str, False
 
-            should_exit_runner = False
             for tc in message.tool_calls:
                 tc_obj, res_str, is_finish = await process_single_tc(tc)
-
                 if is_finish:
                     log_task_action(task_id, "assistant", res_str, agent_name)
                     update_task_status(task_id, 'completed')
                     should_exit_runner = True
                     break
                 else:
-                    log_task_action(task_id, "tool", res_str, f"Система ({tc_obj.function.name})", tc_obj.id)
+                    log_task_action(task_id, "tool", res_str, f"Плагин ({tc_obj.function.name})", tc_obj.id)
                     ts_prefix = f"[{datetime.now().strftime('%H:%M:%S')}] "
                     messages.append({"role": "tool", "tool_call_id": tc_obj.id, "name": tc_obj.function.name, "content": f"{ts_prefix}{res_str}"})
                     
-                    is_error = res_str.startswith("Системная ошибка:") or res_str.startswith("Error:") or "Traceback" in res_str
+                    is_error = res_str.startswith("Ошибка:") or res_str.startswith("Error:") or "Traceback" in res_str
                     if is_error:
                         if tc_obj.function.name == last_tool_error_name and res_str == last_tool_error_msg:
                             consecutive_tool_errors += 1
@@ -204,47 +209,54 @@ async def run_task_loop(
                         last_tool_error_msg = ""
                         
                     if consecutive_tool_errors >= 2:
-                        error_abort_msg = f"[Критическая ошибка] Инструмент '{tc_obj.function.name}' выдал ту же ошибку дважды. Задача прервана во избежание зацикливания."
+                        error_abort_msg = f"[Система] Остановка задачи. Обнаружен цикл ошибок: агент повторно получает одну и ту же ошибку от инструмента '{tc_obj.function.name}'. Требуется вмешательство человека."
                         log_task_action(task_id, "system", error_abort_msg, "")
                         update_task_status(task_id, 'failed')
                         task_failed_due_to_error_loop[0] = True
                         break
-                    
+                        
                 if abort_subsequent_tools[0]:
                     break
                     
-            if should_exit_runner or task_failed_due_to_error_loop[0]:
-                break
-                
+            if should_exit_runner or task_failed_due_to_error_loop[0] or abort_subsequent_tools[0]:
+                loop_should_break = True
+
         else:
             text_reply = (message.content or "").strip()
             if text_reply:
-                print(f"[RUNNER LOOP] Текстовый ответ от LLM: {text_reply[:150]}...", flush=True)
+                print(f"[RUNNER LOOP] Ответ LLM: {text_reply[:150]}...", flush=True)
                 log_task_action(task_id, "assistant", text_reply, agent_name)
                 ts_prefix = f"[{datetime.now().strftime('%H:%M:%S')}] "
                 messages.append({"role": "assistant", "content": f"{ts_prefix}{text_reply}"})
-            
-            task_type = "standard"
-            with get_db() as conn:
-                with conn.cursor() as c:
-                    c.execute("SELECT type FROM tasks WHERE id = %s", (task_id,))
-                    t_row = c.fetchone()
-                    if t_row: 
-                        task_type = t_row[0]
-            
-            if task_type == "step_by_step":
-                print(f"[RUNNER LOOP] Задача {task_id} в режиме step_by_step ожидает действий пользователя.", flush=True)
-                update_task_status(task_id, 'waiting_user')
-                await state.broadcast_ws({"type": "TASK_UPDATED", "task_id": task_id}, user_id)
+
+        # Получаем актуальный тип задачи на конец итерации
+        task_type = "standard"
+        with get_db() as conn:
+            with conn.cursor() as c:
+                c.execute("SELECT type FROM tasks WHERE id = %s", (task_id,))
+                t_row = c.fetchone()
+                if t_row: 
+                    task_type = t_row[0]
+
+        # ВАЖНО: Если задача пошаговая и она еще не завершена - СТАВИМ НА ПАУЗУ В КОНЦЕ ЛЮБОЙ ИТЕРАЦИИ
+        if task_type == "step_by_step" and not should_exit_runner and not task_failed_due_to_error_loop[0]:
+            print(f"[RUNNER LOOP] Задача {task_id} перешла в step_by_step режим ожидания.", flush=True)
+            update_task_status(task_id, 'waiting_user')
+            await state.broadcast_ws({"type": "TASK_UPDATED", "task_id": task_id}, user_id)
+            break
+        else:
+            if loop_should_break:
                 break
-            else:
-                reminder = f"[{datetime.now().strftime('%H:%M:%S')}] [Система: Пожалуйста, используй инструмент 'message_user' для общения, либо вызови инструмент, либо 'finish_task']"
+                
+            if not has_tools:
+                reminder = f"[{datetime.now().strftime('%H:%M:%S')}] [Напоминание: используйте 'message_user' или 'finish_task']"
                 log_task_action(task_id, "system", reminder, "")
                 messages.append({"role": "user", "content": reminder})
-                continue
+            continue
+
     else:
-        log_task_action(task_id, "system", "Превышен лимит итераций (20). Задача остановлена.", "")
+        log_task_action(task_id, "system", "Достигнут лимит шагов (20). Принудительная остановка.", "")
         update_task_status(task_id, 'failed')
 
-    print(f"[RUNNER LOOP] Завершение цикла для задачи {task_id}.", flush=True)
+    print(f"[RUNNER LOOP] Цикл завершен для {task_id}.", flush=True)
     await state.broadcast_ws({"type": "TASK_UPDATED", "task_id": task_id}, user_id)

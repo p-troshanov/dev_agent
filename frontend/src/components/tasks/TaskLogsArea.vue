@@ -13,6 +13,7 @@
            <span class="context-volume" title="Размер контекста">🧠 ~{{ contextTokens }} t</span>
         </div>
         <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
+          <button @click="$emit('open-manual-tools')" class="action-btn outline" title="Запустить инструменты вручную">🛠 Инструменты</button>
           <button v-if="activeTask && activeTask.current_phase === 'execution'" @click="$emit('rollback')" class="action-btn danger outline" style="background: transparent; border-color: #ff4444; color: #ff4444;" title="Откатить все изменения, сделанные в этой задаче">⏪ Откат</button>
           <button v-if="activeTask && ['running', 'pending', 'waiting_user'].includes(activeTask.status)" @click="handleCancel" class="action-btn danger">⏹ Остановить</button>
           <button @click="$emit('duplicate')" class="action-btn outline" title="Создать новую задачу на основе этой">📋 Дублировать</button>
@@ -136,7 +137,7 @@ const props = defineProps({
   activeLogs: Array
 });
 
-const emit = defineEmits(['cancel', 'duplicate', 'refresh', 'continue', 'approve-tool', 'submit-tool', 'next-phase', 'rollback']);
+const emit = defineEmits(['cancel', 'duplicate', 'refresh', 'continue', 'approve-tool', 'submit-tool', 'next-phase', 'rollback', 'open-manual-tools']);
 
 const logsContainer = ref(null)
 const continuePrompt = ref('')

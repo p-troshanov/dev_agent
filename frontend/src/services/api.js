@@ -102,6 +102,7 @@ export const api = {
   continueTask: (id, prompt) => request(`/tasks/${id}/continue`, 'POST', { prompt }),
   nextTaskPhase: (id, phase) => request(`/tasks/${id}/next_phase`, 'POST', { phase }),
   rollbackTask: (id) => request(`/tasks/${id}/rollback`, 'POST'),
+  executeManualAction: (id, action) => request(`/tasks/${id}/manual_action`, 'POST', { action }),
 
   getKeys: () => request('/keys'),
   addKey: (data) => request('/keys', 'POST', data),

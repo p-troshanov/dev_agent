@@ -21,6 +21,7 @@
       @submit-tool="submitToolResponse"
       @next-phase="handleNextPhase"
       @rollback="handleRollback"
+      @open-manual-tools="showManualModal = true"
     />
     
     <TaskCreateModal 
@@ -30,6 +31,12 @@
       :initialData="initialModalData"
       @close="showModal = false"
       @submit="createTask"
+    />
+
+    <TaskManualToolsModal
+      :show="showManualModal"
+      :taskId="activeTaskId"
+      @close="showManualModal = false"
     />
   </div>
 </template>
@@ -42,6 +49,7 @@ import { appStore } from '../stores/appStore'
 import TasksSidebar from '../components/tasks/TasksSidebar.vue'
 import TaskLogsArea from '../components/tasks/TaskLogsArea.vue'
 import TaskCreateModal from '../components/tasks/TaskCreateModal.vue'
+import TaskManualToolsModal from '../components/tasks/TaskManualToolsModal.vue'
 
 const tasks = ref([])
 const agents = ref([])
@@ -50,6 +58,7 @@ const activeTaskId = ref(null)
 const activeLogs = ref([])
 
 const showModal = ref(false)
+const showManualModal = ref(false)
 const initialModalData = ref({})
 const logsAreaRef = ref(null)
 

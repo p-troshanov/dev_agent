@@ -40,6 +40,7 @@ def setup_task_workspace(user_id: int, task_id: int, work_dir: str) -> str:
         
     return work_dir
 
+
 def build_system_prompt(agent_name: str, user_id: int, work_dir: str, tools_desc_map: dict, task_type: str = "standard", current_phase: str = "discovery") -> str:
     real_base = os.path.abspath(os.path.join(BASE_WORKSPACE, f"user_{user_id}")).replace('\\', '/')
     fake_base = f"/workspace/user_{user_id}"
@@ -54,40 +55,41 @@ def build_system_prompt(agent_name: str, user_id: int, work_dir: str, tools_desc
                 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    # --- Выявление ОС для корректных команд ---
+    # --- ДИНАМИЧЕСКИЙ КОНТЕКСТ ОС ДЛЯ АГЕНТА ---
     os_hint = ""
     if os.name == 'nt':
-        os_hint = "5. Система работает на Windows (cmd.exe). Использовать Linux утилиты (ls, rm, pwd) нельзя, используй аналоги Windows (dir, del, cd) или скрипты (git, python). Корневой путь Linux (/workspace/...), маппится автоматически, его можно использовать.\n"
+        os_hint = "5. ВАЖНО: Терминал работает в среде Windows (cmd.exe). Команды Linux (ls, rm, pwd) НЕ РАБОТАЮТ! Используйте аналоги Windows (dir, del, cd) или кроссплатформенные утилиты (git, python). Пути пишите в формате Linux (/workspace/...), система сама их переведет.\n"
     else:
-        os_hint = "5. Система работает на Linux (bash).\n"
+        os_hint = "5. ВАЖНО: Терминал работает в среде Linux (bash).\n"
         
     base_sys_prompt = (
-        f"Тебя зовут '{agent_name}'.\n"
-        f"Текущее время: {current_time}\n"
-        "Выполняй запросы пользователя (instruction) точно и по делу.\n"
-        f"Директория проекта: {fake_work}.\n"
-        "Правила использования инструментов:\n"
-        "1. Инструменты возвращают сырой текст.\n"
-        f"2. Твоя корневая папка ограничена {fake_base}.\n"
-        "3. Вызывай функции строго по JSON-схеме.\n"
-        "4. Для общения с пользователем вызывай 'message_user', если ждешь ответа (is_final=false) или хочешь завершить задачу (is_final=true).\n"
+        f"Вы автономный агент '{agent_name}'.\n"
+        f"Текущее системное время: {current_time}\n"
+        "Ваша задача — выполнить порученную пользователем задачу (instruction) от начала и до конца.\n"
+        f"Текущая рабочая директория: {fake_work}.\n"
+        "Правила выполнения:\n"
+        "1. Выполняйте всю работу в текущей рабочей директории, если не сказано иное.\n"
+        f"2. Вы не можете выходить за пределы корневой папки {fake_base}.\n"
+        "3. Внимательно читайте результаты выполнения команд и ошибки, исправляйте их.\n"
+        "4. Вы ОБЯЗАНЫ в любом случае ответить пользователю, используя хотя бы один инструмент. Используйте 'message_user', чтобы задать вопрос (is_final=false) или завершить задачу (is_final=true).\n"
         f"{os_hint}"
     )
 
     if task_type == "step_by_step":
         phase_instruction = ""
         if current_phase == "discovery":
-            phase_instruction = "Твоя цель сейчас: изучить структуру проекта и запросить содержимое файлов, которые нужны для решения задачи. Не пытайся писать код или предлагать решения на этом этапе. Узнай всё, что нужно для составления плана, и сообщи пользователю, что ты готов к следующему шагу."
+            phase_instruction = "Изучите структуру директорий и файлов проекта. ВАЖНО: запрашивайте чтение сразу ВСЕХ нужных файлов одним вызовом (например, передав список путей в request_files_to_read), а не по одному. Не пытайтесь решать задачу на этом этапе, только собирайте контекст."
         elif current_phase == "planning":
-            phase_instruction = "Твоя цель сейчас: составить пошаговый план решения или задать уточняющие вопросы пользователю. Никаких изменений файлов не делай (инструменты изменения отключены). Пользователь должен утвердить план."
+            phase_instruction = "На основе собранного контекста составьте пошаговый план решения. Не пишите код, используйте 'message_user'."
         elif current_phase == "execution":
-            phase_instruction = "Твоя цель сейчас: применить утвержденный план и внести изменения в код с помощью инструментов. Будь осторожен и вноси изменения аккуратно."
+            phase_instruction = "Выполняйте план по шагам. Пишите код, создавайте файлы. Действуйте обдуманно."
             
-        sys_prompt = f"{base_sys_prompt}\n\n--- ВАЖНО: ТЕКУЩАЯ ФАЗА ЗАДАЧИ: {current_phase.upper()} ---\n{phase_instruction}"
+        sys_prompt = f"{base_sys_prompt}\n\n--- ТЕКУЩАЯ ФАЗА: {current_phase.upper()} ---\n{phase_instruction}"
     else:
         sys_prompt = base_sys_prompt
         
     return sys_prompt
+
 
 def build_initial_messages(task_id: int, initial_prompt: str, is_continue: bool) -> list:
     messages = []
@@ -98,25 +100,26 @@ def build_initial_messages(task_id: int, initial_prompt: str, is_continue: bool)
                 logs = c.fetchall()
                 
         for r_role, r_content, r_agent, t_call_id, created_at in logs:
-            if r_role == 'system':
-                 continue
-                 
+            if r_role == 'system': 
+                continue
+                
             time_str = created_at.strftime("%H:%M:%S") if hasattr(created_at, 'strftime') else ""
             ts_prefix = f"[{time_str}] " if time_str else ""
             
             if r_role == 'user':
                 messages.append({"role": "user", "content": f"{ts_prefix}{r_content}"})
             elif r_role == 'assistant':
-                messages.append({"role": "assistant", "content": f"{ts_prefix}{r_content or '(Вызван инструмент)'}"})
+                messages.append({"role": "assistant", "content": f"{ts_prefix}{r_content or '(пустой ответ)'}"})
             elif r_role == 'tool':
-                messages.append({"role": "user", "content": f"{ts_prefix}Результат инструмента ({r_agent}): {r_content}"})
+                messages.append({"role": "user", "content": f"{ts_prefix}Ответ ({r_agent}): {r_content}"})
                 
         current_time = datetime.now().strftime("%H:%M:%S")
-        messages.append({"role": "user", "content": f"[{current_time}] Пользователь: {initial_prompt}"})
+        messages.append({"role": "user", "content": f"[{current_time}] Продолжение: {initial_prompt}"})
     else:
         current_time = datetime.now().strftime("%H:%M:%S")
         messages.append({"role": "user", "content": f"[{current_time}] {initial_prompt}"})
     return messages
+
 
 def get_active_manager_tools(tools_map: dict, task_type: str = "standard", current_phase: str = "discovery") -> list:
     active_tools_schemas = []
@@ -124,12 +127,12 @@ def get_active_manager_tools(tools_map: dict, task_type: str = "standard", curre
     
     if task_type == "step_by_step":
         if current_phase == "discovery":
-            # На этапе сбора контекста запрещаем модификацию файлов
+            # На фазе discovery запрещаем изменять проект, только чтение
             exclude_tools.update({"write_file", "edit_file", "create_directory", "run_terminal", "install_dependencies", "github_sync", "manage_background_service"})
         elif current_phase == "planning":
-            # На этапе планирования отключаем ВООБЩЕ все файловые инструменты, оставляем только message_user
+            # На фазе planning запрещаем всё, кроме message_user
             exclude_tools.update({"write_file", "edit_file", "create_directory", "run_terminal", "install_dependencies", "github_sync", "manage_background_service", "read_file", "check_file_exists", "scan_project", "restore_backup", "view_file_diff"})
-        # На execution доступны все (или те, которые оставим)
+        # Для execution оставляем всё (по умолчанию)
 
     for name, schema in tools_map.items():
         if name not in exclude_tools:
