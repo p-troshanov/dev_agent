@@ -25,21 +25,70 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
         res["file_path"] = file_path
         res["endpoint"], res["payload"] = "/api/fs/read", {"path": file_path, "user_id": user_id}
         
+    elif f_name == "request_files_to_read":
+        paths = args.get("paths", [])
+        result_texts = []
+        for p in paths:
+            file_path = _resolve_path(p, work_dir, user_id)
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        result_texts.append(f"--- {p} ---\n{f.read()}\n")
+                except Exception as e:
+                    result_texts.append(f"--- {p} ---\n[Ошибка чтения: {e}]\n")
+            else:
+                result_texts.append(f"--- {p} ---\n[Файл не найден]\n")
+        res["result_str"] = "\n".join(result_texts)
+
+    elif f_name == "batch_update_files":
+        updates = args.get("updates", [])
+        result_texts = []
+        
+        # Создаем директорию для группового бекапа по всей задаче
+        base_dir = work_dir if work_dir else _resolve_path("", work_dir, user_id)
+        task_backup_dir = os.path.join(base_dir, ".backups", f"task_{task_id}")
+        os.makedirs(task_backup_dir, exist_ok=True)
+        
+        for update in updates:
+            p = update.get("path", "")
+            content = _strip_zwsp(update.get("content", ""))
+            file_path = _resolve_path(p, work_dir, user_id)
+            
+            if os.path.exists(file_path):
+                try:
+                    rel_path = os.path.relpath(file_path, base_dir)
+                    if rel_path.startswith(".."): rel_path = os.path.basename(file_path)
+                except ValueError:
+                    rel_path = os.path.basename(file_path)
+                    
+                bak_path = os.path.join(task_backup_dir, rel_path)
+                os.makedirs(os.path.dirname(bak_path), exist_ok=True)
+                shutil.copy2(file_path, bak_path)
+                
+            try:
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                result_texts.append(f"Успешно обновлен: {p}")
+            except Exception as e:
+                result_texts.append(f"Ошибка записи {p}: {e}")
+                
+        res["result_str"] = "\n".join(result_texts)
+
     elif f_name == "check_file_exists":
         file_path = _resolve_path(args.get("path", ""), work_dir, user_id)
         if os.path.exists(file_path):
             if os.path.isfile(file_path):
                 size = os.path.getsize(file_path)
-                res["result_str"] = f"Файл существует: {file_path} (размер: {size} байт)"
+                res["result_str"] = f"Файл существует: {file_path} (Размер: {size} байт)"
             else:
-                res["result_str"] = f"Папка существует: {file_path}"
+                res["result_str"] = f"Директория существует: {file_path}"
         else:
-            res["result_str"] = f"Не найдено: {file_path}"
+            res["result_str"] = f"Путь не найден: {file_path}"
 
     elif f_name == "write_file":
         file_path = _resolve_path(args.get("path", ""), work_dir, user_id)
         res["file_path"] = file_path
-
         if file_path and os.path.exists(file_path):
             try:
                 base_dir = work_dir if work_dir else os.path.dirname(os.path.abspath(file_path))
@@ -64,7 +113,7 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
                 res["last_modified_file"] = file_path
                 res["last_backup_file"] = bak_path
             except Exception as e:
-                print(f"Ошибка бэкапа: {e}")
+                print(f"Ошибка бекапа: {e}")
                 
         res["endpoint"], res["payload"] = "/api/fs/write", {"path": file_path, "content": args.get("content", ""), "user_id": user_id}
 
@@ -103,10 +152,10 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
                     updated_content = content.replace(search_string, replace_string, 1)
                     res["endpoint"], res["payload"] = "/api/fs/write", {"path": file_path, "content": updated_content, "user_id": user_id}
                 else:
-                    res["result_str"] = "Строка (search_string) не найдена. Убедитесь в точном совпадении или используйте write_file."
+                    res["result_str"] = "Строка (search_string) не найдена в файле. Проверьте правильность строки или используйте write_file."
                     
             except Exception as e:
-                res["result_str"] = f"Ошибка чтения: {e}"
+                res["result_str"] = f"Ошибка чтения файла: {e}"
         else:
             res["result_str"] = f"Файл не найден: {file_path}"
 
@@ -116,17 +165,17 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
             os.makedirs(dir_path, exist_ok=True)
             res["result_str"] = f"Директория создана: {dir_path}"
         except Exception as e:
-            res["result_str"] = f"Ошибка: {e}"
+            res["result_str"] = f"Ошибка создания директории: {e}"
             
     elif f_name == "attach_file":
         file_path = _resolve_path(args.get("path", ""), work_dir, user_id)
         safe_url = urllib.parse.quote(file_path)
-        res["result_str"] = f"Файл {file_path} прикреплен для пользователя.\n\n[ATTACHMENT](/api/tools/fs/download?path={safe_url})"
+        res["result_str"] = f"Файл {file_path} прикреплен для скачивания.\n\n[ATTACHMENT](/api/tools/fs/download?path={safe_url})"
         
     elif f_name == "scan_project":
         scan_dir = _resolve_path(args.get("work_dir", work_dir), work_dir, user_id)
         if not scan_dir or not os.path.exists(scan_dir):
-            res["result_str"] = "Директория не найдена."
+            res["result_str"] = "Неверная директория проекта"
         else:
             try:
                 ignore_dirs = {'.git', 'node_modules', 'venv', '.backups', '__pycache__', '.venv', 'dist', 'build'}
@@ -149,19 +198,19 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
                                 elif f.endswith(('.js', '.ts', '.vue')):
                                     items_raw = re.findall(r'(?:function\s+(\w+)|(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[^=]*)\s*=>|class\s+(\w+))', content)
                                     items = [i for tup in items_raw for i in tup if i]
-                                
+                                                                 
                                 imports = re.findall(r'^(?:import|from)\s+.*', content, re.MULTILINE)
-                                
+                                                                 
                                 tree.append(f"Файл: {rel_path}")
                                 if imports:
-                                    tree.append("  Импорты: " + ", ".join(imports[:5]) + (f" ... (и еще {len(imports)-5})" if len(imports)>5 else ""))
+                                    tree.append("  Импорты: " + ", ".join(imports[:5]) + (f" ... (еще {len(imports)-5})" if len(imports)>5 else ""))
                                 if items:
-                                    tree.append("  Сущности: " + ", ".join(items[:15]) + (f" ... (и еще {len(items)-15})" if len(items)>15 else ""))
+                                    tree.append("  Функции/Классы: " + ", ".join(items[:15]) + (f" ... (еще {len(items)-15})" if len(items)>15 else ""))
                             except Exception:
                                 tree.append(f"Файл: {rel_path} (ошибка чтения)")
-                res["result_str"] = "Структура кода:\n" + "\n".join(tree)
+                res["result_str"] = "Структура проекта:\n" + "\n".join(tree)
             except Exception as e:
-                res["result_str"] = f"Ошибка: {e}"
+                res["result_str"] = f"Ошибка сканирования: {e}"
 
     elif f_name == "restore_backup":
         try:
@@ -172,7 +221,7 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
             backup_dir = os.path.join(base_dir, ".backups")
             
             if not os.path.exists(backup_dir):
-                res["result_str"] = "Нет папки .backups, откатывать нечего."
+                res["result_str"] = "Папка .backups не найдена, нечего восстанавливать."
             else:
                 backups_by_orig = {}
                 for root, dirs, files in os.walk(backup_dir):
@@ -206,12 +255,11 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
                     restored_files.append(orig_path)
                     
                 if restored_files:
-                    res["result_str"] = f"Восстановлены файлы (за последние {time_minutes} мин):\n" + "\n".join(restored_files)
+                    res["result_str"] = f"Успешно восстановлены файлы (откат на {time_minutes} минут назад):\n" + "\n".join(restored_files)
                 else:
-                    res["result_str"] = f"Не найдено подходящих бэкапов за последние {time_minutes} минут."
-
+                    res["result_str"] = f"Не найдено бекапов за последние {time_minutes} минут."
         except Exception as e:
-            res["result_str"] = f"Ошибка: {e}"
+            res["result_str"] = f"Ошибка восстановления: {e}"
 
     elif f_name == "check_syntax":
         file_path = _resolve_path(args.get("path", ""), work_dir, user_id)
@@ -221,7 +269,7 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
         elif ext in ['.js', '.ts', '.vue']:
             res["endpoint"], res["payload"] = "/api/terminal/run", {"command": f"node --check {file_path}", "work_dir": work_dir, "user_id": user_id}
         else:
-            res["result_str"] = f"Проверка синтаксиса пока только для .py, .js, .ts. Файл {ext} проигнорирован."
+            res["result_str"] = f"Проверка синтаксиса поддерживается только для .py, .js, .ts. Расширение {ext} не поддерживается."
             
     elif f_name == "install_dependencies":
         manager = args.get("manager", "").lower()
@@ -235,12 +283,12 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
             cmd = f"npm install {packages}"
             res["endpoint"], res["payload"] = "/api/terminal/run", {"command": cmd, "work_dir": t_work_dir, "user_id": user_id}
         else:
-            res["result_str"] = f"Неизвестный менеджер {manager}. Используйте pip, npm."
+            res["result_str"] = f"Неизвестный менеджер {manager}. Используйте pip или npm."
 
     elif f_name == "view_file_diff":
         file_path = _resolve_path(args.get("path", ""), work_dir, user_id)
         if not os.path.exists(file_path):
-            res["result_str"] = f"Файл {file_path} не найден."
+            res["result_str"] = f"Файл {file_path} не существует."
         else:
             base_dir = _resolve_path(work_dir, work_dir, user_id)
             backup_dir = os.path.join(base_dir, ".backups")
@@ -257,11 +305,11 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
             
             search_dir = os.path.join(backup_dir, orig_dir)
             if not os.path.exists(search_dir):
-                res["result_str"] = f"Бэкапы для {file_path} не найдены."
+                res["result_str"] = f"Бекапов для {file_path} не найдено."
             else:
                 baks = [f for f in os.listdir(search_dir) if f.startswith(name + "_") and f.endswith(ext)]
                 if not baks:
-                    res["result_str"] = f"Бэкапы для {file_path} не найдены."
+                    res["result_str"] = f"Бекапов для {file_path} не найдено."
                 else:
                     baks.sort(reverse=True)
                     latest_bak = os.path.join(search_dir, baks[0])
@@ -275,8 +323,8 @@ async def execute_fs_code_tool(f_name: str, args: dict, work_dir: str, last_modi
                         if diff:
                             res["result_str"] = "```diff\n" + "".join(diff) + "\n```"
                         else:
-                            res["result_str"] = "Файл не отличается от последнего бэкапа."
+                            res["result_str"] = "Изменений по сравнению с последним бекапом нет."
                     except Exception as e:
-                        res["result_str"] = f"Ошибка diff: {e}"
+                        res["result_str"] = f"Ошибка генерации diff: {e}"
                         
     return res

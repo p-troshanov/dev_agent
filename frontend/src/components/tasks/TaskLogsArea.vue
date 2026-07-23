@@ -13,12 +13,10 @@
            <span class="context-volume" title="Размер контекста">🧠 ~{{ contextTokens }} t</span>
         </div>
         <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
+          <button v-if="activeTask && activeTask.current_phase === 'execution'" @click="$emit('rollback')" class="action-btn danger outline" style="background: transparent; border-color: #ff4444; color: #ff4444;" title="Откатить все изменения, сделанные в этой задаче">⏪ Откат</button>
           <button v-if="activeTask && ['running', 'pending', 'waiting_user'].includes(activeTask.status)" @click="handleCancel" class="action-btn danger">⏹ Остановить</button>
-          <button @click="openTaskIde" class="action-btn outline" title="Открыть рабочую директорию задачи в IDE">☁️ Папка задачи</button>
           <button @click="$emit('duplicate')" class="action-btn outline" title="Создать новую задачу на основе этой">📋 Дублировать</button>
-          <button @click="downloadTaskContext" class="action-btn outline" title="Скачать контекст">📥 Контекст</button>
           <button @click="downloadTaskDebug" class="action-btn outline" title="JSON Отладка">🐞 JSON</button>
-          <button @click="$emit('refresh')" class="action-btn outline" title="Обновить логи">🔄 Обновить</button>
         </div>
       </div>
 
@@ -93,19 +91,32 @@
       </div>
     </div>
     
-    <div v-if="activeTask && ['completed', 'failed'].includes(activeTask.status)" class="continue-task-panel">
-      <textarea 
-        ref="continueInputRef"
-        v-model="continuePrompt" 
-        @keydown.enter.exact.prevent="handleContinueTask"
-        @focus="isContinuePromptFocused = true"
-        @blur="isContinuePromptFocused = false"
-        @input="autoResize"
-        class="modern-input custom-scrollbar" 
-        placeholder="Задача остановлена. Напишите сюда, чтобы выдать новые указания и продолжить..."
-        rows="1" 
-      ></textarea>
-      <button @click="handleContinueTask" class="action-btn primary" :disabled="!continuePrompt.trim()">Продолжить</button>
+    <div v-if="activeTask && ['completed', 'failed', 'waiting_user'].includes(activeTask.status)" class="continue-task-panel">
+      <div style="width: 100%; display: flex; flex-direction: column; gap: 12px;">
+         
+         <div v-if="activeTask.type === 'step_by_step' && activeTask.status === 'waiting_user'" class="phase-actions" style="display: flex; gap: 12px; background: rgba(107, 76, 154, 0.1); padding: 12px; border-radius: 8px; border: 1px solid rgba(107, 76, 154, 0.3);">
+            <div style="font-size: 13px; color: #c4b5fd; align-self: center; flex: 1;">
+               Фаза: <strong>{{ formatPhase(activeTask.current_phase) }}</strong>. Агент ждет ваших указаний или перехода на следующий шаг.
+            </div>
+            <button v-if="activeTask.current_phase === 'discovery'" @click="$emit('next-phase', 'planning')" class="action-btn primary" style="background: var(--accent-purple); border-color: var(--accent-purple);">➡️ Перейти к планированию</button>
+            <button v-if="activeTask.current_phase === 'planning' && activeTask.target_action === 'full_execution'" @click="$emit('next-phase', 'execution')" class="action-btn primary" style="background: var(--accent-purple); border-color: var(--accent-purple);">➡️ План утвержден, начать кодинг</button>
+         </div>
+
+         <div style="display: flex; align-items: flex-end; gap: 12px; width: 100%;">
+            <textarea 
+              ref="continueInputRef"
+              v-model="continuePrompt" 
+              @keydown.enter.exact.prevent="handleContinueTask"
+              @focus="isContinuePromptFocused = true"
+              @blur="isContinuePromptFocused = false"
+              @input="autoResize"
+              class="modern-input custom-scrollbar" 
+              placeholder="Напишите сюда, чтобы выдать новые указания и продолжить..."
+              rows="1" 
+            ></textarea>
+            <button @click="handleContinueTask" class="action-btn primary" :disabled="!continuePrompt.trim()">Отправить</button>
+         </div>
+      </div>
     </div>
   </div>
 </template>
@@ -125,7 +136,7 @@ const props = defineProps({
   activeLogs: Array
 });
 
-const emit = defineEmits(['cancel', 'duplicate', 'refresh', 'continue', 'approve-tool', 'submit-tool']);
+const emit = defineEmits(['cancel', 'duplicate', 'refresh', 'continue', 'approve-tool', 'submit-tool', 'next-phase', 'rollback']);
 
 const logsContainer = ref(null)
 const continuePrompt = ref('')
@@ -140,6 +151,15 @@ const contextTokens = computed(() => {
   const textLength = props.activeLogs.reduce((acc, log) => acc + (log.content ? log.content.length : 0), 0);
   return Math.ceil(textLength / 4);
 })
+
+const formatPhase = (phase) => {
+  const map = {
+    'discovery': '🔍 Анализ проекта',
+    'planning': '📝 Планирование',
+    'execution': '💻 Написание кода'
+  }
+  return map[phase] || phase;
+}
 
 const copyText = async (text, id) => {
   if (!text) return;
@@ -284,7 +304,6 @@ const formatLogContent = (text) => {
     } catch(e) {}
   }
 
-  // 1. Извлекаем блоки кода
   const codeBlocks = [];
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
     codeBlocks.push(code);
@@ -297,32 +316,26 @@ const formatLogContent = (text) => {
 
   html = sanitizeHtml(html);
 
-  // 2. Жирный, Курсив, Инлайн-Код
   html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
   html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 4px; font-family: monospace; color: #e4e4e7;">$1</code>');
 
-  // 3. Заголовки (Markdown)
   html = html.replace(/^### (.*$)/gim, '<h3 style="margin: 16px 0 8px; color: var(--accent-blue);">$1</h3>');
   html = html.replace(/^## (.*$)/gim, '<h2 style="margin: 18px 0 10px; color: var(--accent-purple);">$1</h2>');
   html = html.replace(/^# (.*$)/gim, '<h1 style="margin: 20px 0 12px; color: var(--text-main); font-size: 1.4em;">$1</h1>');
 
-  // 4. Специфичные правила RITA (Кнопки)
   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img data-auth-src="$2" alt="$1" class="auth-image" style="max-width:100%; max-height:400px; border-radius:8px; display:block; margin:8px 0;" />');
   html = html.replace(/\[ФАЙЛ СОХРАНЕН\]:\s*(.+)/g, '<br><button class="action-btn outline editor-trigger mt-2" data-path="$1">📄 Открыть $1 в IDE</button>');
   html = html.replace(/\[ATTACHMENT\]\((.+?)\)/g, '<br><a href="$1" target="_blank" class="action-btn primary mt-2" style="display: inline-block; text-decoration: none;">⬇️ Скачать результат</a>');
 
-  // 5. Списки
   html = html.replace(/^\s*[-*]\s+(.*)$/gim, '<li style="margin-left: 20px; list-style-type: disc; margin-bottom: 4px;">$1</li>');
   html = html.replace(/^\s*\d+\.\s+(.*)$/gim, '<li style="margin-left: 20px; list-style-type: decimal; margin-bottom: 4px;">$1</li>');
 
-  // 6. Переносы строк (избегаем разрывов внутри списков и заголовков)
   html = html.split('\n').join('<br>');
   html = html.replace(/<\/h[1-3]><br>/g, (m) => m.replace('<br>', ''));
   html = html.replace(/<\/li><br>/g, '</li>');
   html = html.replace(/<br><li/g, '<li');
 
-  // 7. Возвращаем блоки кода
   html = html.replace(/___CODEBLOCK_(\d+)___/g, (match, index) => {
     const code = sanitizeHtml(codeBlocks[index].trim());
     return `<div class="md-code-block" style="margin: 12px 0;"><div style="background: rgba(0,0,0,0.4); padding: 6px 12px; font-size: 11px; color: #8b8b9e; border-top-left-radius: 8px; border-top-right-radius: 8px; border: 1px solid var(--border-color); border-bottom: none; display: flex; justify-content: space-between; align-items: center;"><span>Код / Логи</span></div><pre style="margin: 0; background: #0d0d12; padding: 12px; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; border: 1px solid var(--border-color); overflow-x: auto; font-family: 'Consolas', monospace; font-size: 13px; color: #a3b8cc; line-height: 1.4;">${code}</pre></div>`;
@@ -332,7 +345,7 @@ const formatLogContent = (text) => {
 }
 
 const handleLogClick = async (e) => {
-  activeLogMenuId.value = null; // Закрытие меню при клике по области
+  activeLogMenuId.value = null; 
   
   if (e.target.classList.contains('editor-trigger')) {
     const path = e.target.getAttribute('data-path')
@@ -419,7 +432,6 @@ defineExpose({ scrollToBottom });
 
 .markdown-body { display: block; width: 100%; }
 
-/* Всплывающее меню */
 .msg-menu-container { position: absolute; top: 6px; right: 8px; z-index: 5; }
 .msg-menu-btn { cursor: pointer; color: var(--text-muted); opacity: 0; transition: opacity 0.2s; font-size: 18px; line-height: 1; padding: 2px 8px; border-radius: 4px; background: transparent; border: none; font-weight: bold;}
 .log-content:hover .msg-menu-btn { opacity: 1; }
@@ -428,9 +440,12 @@ defineExpose({ scrollToBottom });
 .msg-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; background: transparent; border: none; color: var(--text-main); font-size: 13px; text-align: left; cursor: pointer; border-radius: 4px; transition: 0.2s; white-space: nowrap; }
 .msg-menu-item:hover { background: var(--bg-surface-hover); color: var(--accent-blue); }
 
-.tool-output { background: #0d0d12; border-color: rgba(163, 114, 50, 0.4); padding: 0; border-radius: 8px; }
+.tool-output { background: #0d0d12; border-color: rgba(163, 114, 50, 0.4); padding: 0; border-radius: 8px; overflow: hidden; }
 .tool-output.approval-mode { border-color: var(--warning); border-width: 2px; }
-.tool-label { background: rgba(163, 114, 50, 0.15); color: var(--warning); padding: 6px 12px; font-size: 12px; font-family: monospace; border-bottom: 1px solid rgba(163, 114, 50, 0.4); border-top-left-radius: 8px; border-top-right-radius: 8px; }
+.tool-label { background: rgba(163, 114, 50, 0.15); color: var(--warning); padding: 8px 16px; font-size: 12px; font-weight: 600; font-family: monospace; border-bottom: 1px solid rgba(163, 114, 50, 0.4); border-top-left-radius: 8px; border-top-right-radius: 8px; display: flex; align-items: center; gap: 8px; }
+.tool-output .markdown-body { padding: 12px 16px; }
+.tool-output .markdown-body :first-child { margin-top: 0; }
+.tool-output .markdown-body :last-child { margin-bottom: 0; }
 
 .approval-panel { padding: 16px; background: rgba(163, 114, 50, 0.05); }
 

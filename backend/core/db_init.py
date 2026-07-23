@@ -5,7 +5,7 @@ import uuid
 from backend.core.database import get_db, init_db_pool
 
 def init_db():
-    # --- ОБНОВЛЕНИЕ TOOLS.JSON (удаление rationale) ---
+    # --- ОЧИСТКА TOOLS.JSON (Удаление rationale) ---
     try:
         tools_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'tools/tools.json'))
         if os.path.exists(tools_path):
@@ -13,7 +13,7 @@ def init_db():
                 content = f.read()
                 lines = [line for line in content.split('\n') if not line.strip().startswith('#') and not line.strip().startswith('//')]
                 tools_data = json.loads('\n'.join(lines))
-                
+            
             changed = False
             for t in tools_data:
                 func = t.get("schema_json", {}).get("function", {})
@@ -25,13 +25,13 @@ def init_db():
                 if "required" in params and "rationale" in params["required"]:
                     params["required"].remove("rationale")
                     changed = True
-                    
+                
             if changed:
                 with open(tools_path, 'w', encoding='utf-8') as f:
                     json.dump(tools_data, f, ensure_ascii=False, indent=4)
-                print("Поле 'rationale' удалено из tools.json!")
+                print("Успешно удален 'rationale' из tools.json!")
     except Exception as e:
-        print(f"Ошибка при очистке tools.json: {e}")
+        print(f"Ошибка очистки tools.json: {e}")
     # ---------------------------------------------------------
 
     init_db_pool()
@@ -136,15 +136,30 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
                 title VARCHAR,
-                type VARCHAR,
+                type VARCHAR DEFAULT 'standard',
                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 status VARCHAR,
+                current_phase VARCHAR DEFAULT 'discovery',
+                target_action VARCHAR DEFAULT 'full_execution',
                 agent_id INTEGER REFERENCES agents(id) ON DELETE SET NULL,
                 is_cancelled INTEGER DEFAULT 0,
                 work_dir TEXT DEFAULT '',
                 auto_approve_tools INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )''')
+
+            # Миграции для старых БД (добавление новых колонок для пошагового режима)
+            c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='tasks' AND column_name='type'")
+            if not c.fetchone():
+                c.execute("ALTER TABLE tasks ADD COLUMN type VARCHAR DEFAULT 'standard'")
+                
+            c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='tasks' AND column_name='current_phase'")
+            if not c.fetchone():
+                c.execute("ALTER TABLE tasks ADD COLUMN current_phase VARCHAR DEFAULT 'discovery'")
+                
+            c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='tasks' AND column_name='target_action'")
+            if not c.fetchone():
+                c.execute("ALTER TABLE tasks ADD COLUMN target_action VARCHAR DEFAULT 'full_execution'")
 
             c.execute('''CREATE TABLE IF NOT EXISTS task_logs (
                 id SERIAL PRIMARY KEY,
@@ -176,6 +191,7 @@ def init_db():
                 task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )''')
+
         conn.commit()
 
 def create_system_agents_if_needed(user_id: int):
@@ -186,7 +202,7 @@ def create_system_agents_if_needed(user_id: int):
                 rita_prompt = """Вы системный агент RITA (Supervisor)."""
                 c.execute('''INSERT INTO agents (user_id, name, profession, description, model, system_prompt, skills, is_default, is_main, settings)
                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)''',
-                          (user_id, "Рита", "Системный ИИ", "Управляет платформой", None, rita_prompt, "{}", 1, 1, "{}"))
+                          (user_id, "РИТА", "Управляющий ИИ", "Главный системный агент", None, rita_prompt, "{}", 1, 1, "{}"))
         conn.commit()
 
 def reset_running_tasks():

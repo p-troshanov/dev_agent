@@ -20,7 +20,10 @@
       >
         <div class="task-info">
           <span class="task-title">{{ task.title }}</span>
-          <span class="task-type">{{ task.project_name }}</span>
+          <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-end;">
+            <span class="task-type">{{ task.project_name }}</span>
+            <span v-if="task.type === 'step_by_step'" class="task-phase-badge">{{ formatPhase(task.current_phase) }}</span>
+          </div>
         </div>
         <div style="font-size: 11px; color: var(--text-muted); margin-top: -2px; display: flex; align-items: center; gap: 4px;">
           <span>🤖 Исполнитель:</span> <span style="color: var(--accent-blue); font-weight: 500;">{{ task.agent_name || 'Не назначен' }}</span>
@@ -56,6 +59,15 @@ const formatStatus = (status) => {
   }
   return map[status] || status
 }
+
+const formatPhase = (phase) => {
+  const map = {
+    'discovery': '🔍 Анализ',
+    'planning': '📝 План',
+    'execution': '💻 Кодинг'
+  }
+  return map[phase] || phase;
+}
 </script>
 
 <style scoped>
@@ -73,6 +85,7 @@ const formatStatus = (status) => {
 .task-info { display: flex; justify-content: space-between; align-items: flex-start; }
 .task-title { font-size: 14px; font-weight: 500; color: var(--text-main); word-wrap: break-word; flex: 1; }
 .task-type { font-size: 11px; background: var(--bg-base); border: 1px solid var(--border-color); padding: 2px 6px; border-radius: 4px; color: var(--text-muted); margin-left: 8px; white-space: nowrap; }
+.task-phase-badge { font-size: 10px; background: rgba(107, 76, 154, 0.2); color: #c4b5fd; padding: 2px 6px; border-radius: 4px; white-space: nowrap; border: 1px solid rgba(107, 76, 154, 0.4); }
 
 .task-status { font-size: 12px; font-weight: 600; }
 .task-status.pending { color: var(--warning); }

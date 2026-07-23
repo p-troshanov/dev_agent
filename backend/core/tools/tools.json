@@ -1,23 +1,24 @@
+# backend/core/tools/tools.json
 [
     {
         "name": "message_user",
-        "category": "Интерфейс",
+        "category": "Управление",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "message_user",
-                "description": "Написать сообщение пользователю (задать вопрос, отчитаться о выполнении или просто ответить). Этим инструментом нужно завершать задачу или приостанавливать для ответа.",
+                "description": "Отправить сообщение пользователю. Используйте для уточнения задачи или промежуточного ответа.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "message": {
                             "type": "string",
-                            "description": "Текст сообщения для пользователя."
+                            "description": "Текст сообщения для пользователя"
                         },
                         "is_final": {
                             "type": "boolean",
-                            "description": "Установите true, если задача полностью завершена, иначе false (если ждете ответа)."
+                            "description": "Установите true, если это финальный ответ по задаче, иначе false (по умолчанию)"
                         }
                     },
                     "required": [
@@ -46,7 +47,7 @@
                         },
                         "work_dir": {
                             "type": "string",
-                            "description": "Рабочая директория"
+                            "description": "Относительный путь рабочей директории (опционально)"
                         }
                     },
                     "required": [
@@ -58,7 +59,7 @@
     },
     {
         "name": "read_file",
-        "category": "Файлы",
+        "category": "Файловая система",
         "settings": {},
         "schema_json": {
             "type": "function",
@@ -70,7 +71,7 @@
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Путь к файлу"
+                            "description": "Относительный путь к файлу"
                         }
                     },
                     "required": [
@@ -82,7 +83,7 @@
     },
     {
         "name": "check_file_exists",
-        "category": "Файлы",
+        "category": "Файловая система",
         "settings": {},
         "schema_json": {
             "type": "function",
@@ -94,7 +95,7 @@
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Относительный или абсолютный путь."
+                            "description": "Относительный путь"
                         }
                     },
                     "required": [
@@ -106,27 +107,27 @@
     },
     {
         "name": "edit_file",
-        "category": "Файлы",
+        "category": "Файловая система",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "edit_file",
-                "description": "Заменить часть текста в файле.",
+                "description": "Заменить строку или блок текста в файле на новый.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Относительный путь к файлу."
+                            "description": "Относительный путь к файлу"
                         },
                         "search_string": {
                             "type": "string",
-                            "description": "Точная строка для поиска."
+                            "description": "Точная строка, которую нужно найти и заменить"
                         },
                         "replace_string": {
                             "type": "string",
-                            "description": "Строка для замены."
+                            "description": "Новая строка, на которую нужно заменить"
                         }
                     },
                     "required": [
@@ -140,23 +141,23 @@
     },
     {
         "name": "write_file",
-        "category": "Файлы",
+        "category": "Файловая система",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "write_file",
-                "description": "Перезаписать файл новым содержимым.",
+                "description": "Перезаписать или создать файл с новым содержимым.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Путь к файлу"
+                            "description": "Относительный путь к файлу"
                         },
                         "content": {
                             "type": "string",
-                            "description": "Новый текст файла."
+                            "description": "Содержимое файла"
                         }
                     },
                     "required": [
@@ -169,19 +170,19 @@
     },
     {
         "name": "create_directory",
-        "category": "Файлы",
+        "category": "Файловая система",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "create_directory",
-                "description": "Создать новую папку.",
+                "description": "Создать новую папку (и все родительские, если нужно).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Путь к создаваемой папке."
+                            "description": "Относительный путь к директории"
                         }
                     },
                     "required": [
@@ -193,19 +194,19 @@
     },
     {
         "name": "attach_file",
-        "category": "Файлы",
+        "category": "Файловая система",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "attach_file",
-                "description": "Прикрепить ссылку на файл.",
+                "description": "Прикрепить файл из файловой системы пользователя к ответу для скачивания (генерация ссылки).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Путь к файлу."
+                            "description": "Относительный путь к файлу"
                         }
                     },
                     "required": [
@@ -217,19 +218,19 @@
     },
     {
         "name": "scan_project",
-        "category": "Код",
+        "category": "Файловая система",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "scan_project",
-                "description": "Сканировать структуру проекта.",
+                "description": "Глубокое сканирование проекта: возвращает дерево файлов с классами/функциями и импортами.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "work_dir": {
                             "type": "string",
-                            "description": "Директория для сканирования."
+                            "description": "Директория для сканирования (опционально)"
                         }
                     },
                     "required": []
@@ -239,19 +240,19 @@
     },
     {
         "name": "restore_backup",
-        "category": "Код",
+        "category": "Файловая система",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "restore_backup",
-                "description": "Восстановить бэкапы файлов.",
+                "description": "Массовое восстановление файлов из бекапа. Откатывает изменения за последние N минут.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "time_minutes": {
                             "type": "integer",
-                            "description": "За сколько последних минут восстанавливать."
+                            "description": "За сколько последних минут искать бекапы (по умолчанию 60)"
                         }
                     },
                     "required": [
@@ -269,7 +270,7 @@
             "type": "function",
             "function": {
                 "name": "manage_background_service",
-                "description": "Управление фоновыми процессами (запуск/остановка/статус).",
+                "description": "Управление фоновыми процессами (старт сервера, остановка).",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -284,15 +285,15 @@
                         },
                         "command": {
                             "type": "string",
-                            "description": "Команда (только при action=start)"
+                            "description": "Команда для запуска (только для action=start)"
                         },
                         "service_id": {
                             "type": "string",
-                            "description": "ID процесса (при stop или status)"
+                            "description": "ID процесса (обязательно для stop и status)"
                         },
                         "work_dir": {
                             "type": "string",
-                            "description": "Рабочая директория."
+                            "description": "Рабочая директория"
                         }
                     },
                     "required": [
@@ -310,17 +311,17 @@
             "type": "function",
             "function": {
                 "name": "get_service_logs",
-                "description": "Получить логи фонового процесса.",
+                "description": "Получить последние логи фонового процесса.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "service_id": {
                             "type": "string",
-                            "description": "ID процесса из manage_background_service."
+                            "description": "ID сервиса из manage_background_service."
                         },
                         "lines": {
                             "type": "integer",
-                            "description": "Количество строк лога (по умолчанию 50)"
+                            "description": "Количество строк с конца (по умолчанию 50)"
                         }
                     },
                     "required": [
@@ -332,19 +333,19 @@
     },
     {
         "name": "check_syntax",
-        "category": "Код",
+        "category": "Анализ кода",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "check_syntax",
-                "description": "Проверить синтаксис файла.",
+                "description": "Проверить синтаксис файла без его выполнения (py_compile для Python, node --check для JS).",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Путь к файлу."
+                            "description": "Относительный путь к файлу"
                         }
                     },
                     "required": [
@@ -356,13 +357,13 @@
     },
     {
         "name": "install_dependencies",
-        "category": "Система",
+        "category": "Среда выполнения",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "install_dependencies",
-                "description": "Установить зависимости.",
+                "description": "Установить зависимости через pip или npm.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -376,11 +377,11 @@
                         },
                         "packages": {
                             "type": "string",
-                            "description": "Пакеты (или пусто для requirements/package.json)"
+                            "description": "Список пакетов через пробел (оставьте пустым для установки из requirements/package.json)"
                         },
                         "work_dir": {
                             "type": "string",
-                            "description": "Рабочая директория."
+                            "description": "Рабочая директория (где лежит package.json или requirements.txt)"
                         }
                     },
                     "required": [
@@ -392,19 +393,19 @@
     },
     {
         "name": "view_file_diff",
-        "category": "Файлы",
+        "category": "Файловая система",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "view_file_diff",
-                "description": "Просмотр разницы между текущим и прошлым бэкапом.",
+                "description": "Посмотреть diff (разницу) между текущей версией файла и его последним бекапом.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
-                            "description": "Путь к файлу."
+                            "description": "Относительный путь к файлу"
                         }
                     },
                     "required": [
@@ -416,13 +417,13 @@
     },
     {
         "name": "manage_agent",
-        "category": "Агенты",
+        "category": "Управление",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "manage_agent",
-                "description": "Управление агентами (создать/изменить/удалить).",
+                "description": "Управление субагентами (создание, изменение, удаление).",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -437,7 +438,7 @@
                         },
                         "agent_id": {
                             "type": "integer",
-                            "description": "ID агента (для update и delete)"
+                            "description": "ID агента (нужно для update и delete)"
                         },
                         "agent_data": {
                             "type": "object",
@@ -478,23 +479,23 @@
     },
     {
         "name": "delegate_task",
-        "category": "Агенты",
+        "category": "Управление",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "delegate_task",
-                "description": "Делегировать задачу другому агенту.",
+                "description": "Поручить задачу другому агенту.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "agent_name": {
                             "type": "string",
-                            "description": "Имя агента."
+                            "description": "Имя агента (name)"
                         },
                         "instruction": {
                             "type": "string",
-                            "description": "Инструкция."
+                            "description": "Подробная инструкция для агента"
                         }
                     },
                     "required": [
@@ -507,7 +508,7 @@
     },
     {
         "name": "github_sync",
-        "category": "Система",
+        "category": "Управление",
         "settings": {},
         "schema_json": {
             "type": "function",
@@ -527,7 +528,7 @@
                         },
                         "project_id": {
                             "type": "integer",
-                            "description": "ID проекта."
+                            "description": "ID проекта (чтобы взять настройки репозитория)"
                         },
                         "commit_message": {
                             "type": "string",
@@ -535,7 +536,7 @@
                         },
                         "branch": {
                             "type": "string",
-                            "description": "Ветка (по умолчанию main)."
+                            "description": "Ветка (опционально, иначе из настроек или main)."
                         }
                     },
                     "required": [
@@ -548,36 +549,90 @@
     },
     {
         "name": "summarize_text",
-        "category": "Утилиты",
+        "category": "Анализ",
         "settings": {},
         "schema_json": {
             "type": "function",
             "function": {
                 "name": "summarize_text",
-                "description": "Суммаризация или форматирование большого текста с помощью LLM.",
+                "description": "Суммаризация большого текста или лога через отдельный LLM.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "text": {
                             "type": "string",
-                            "description": "Текст (или file_path)"
+                            "description": "Текст (опционально, если передан file_path)"
                         },
                         "format": {
                             "type": "string",
-                            "description": "Формат (например, 'краткая выжимка', 'JSON формат')"
+                            "description": "Требуемый формат ('Краткая выжимка', 'JSON отчет' и т.д.)"
                         },
                         "file_path": {
                             "type": "string",
-                            "description": "Путь к файлу"
+                            "description": "Путь к файлу для суммаризации"
                         },
                         "output_file": {
                             "type": "string",
-                            "description": "Куда сохранить результат"
+                            "description": "Путь для сохранения результата"
                         }
                     },
                     "required": [
                         "format"
                     ]
+                }
+            }
+        }
+    },
+    {
+        "name": "request_files_to_read",
+        "category": "Файловая система",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "request_files_to_read",
+                "description": "Читает сразу несколько файлов и возвращает их содержимое. Идеально для фазы сбора контекста.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "paths": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            },
+                            "description": "Список путей к файлам от корня проекта"
+                        }
+                    },
+                    "required": ["paths"]
+                }
+            }
+        }
+    },
+    {
+        "name": "batch_update_files",
+        "category": "Файловая система",
+        "settings": {},
+        "schema_json": {
+            "type": "function",
+            "function": {
+                "name": "batch_update_files",
+                "description": "Массово перезаписывает файлы в проекте. Автоматически создает единый бэкап для текущей задачи.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "updates": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "path": { "type": "string", "description": "Путь к файлу" },
+                                    "content": { "type": "string", "description": "Новый полный код файла" }
+                                },
+                                "required": ["path", "content"]
+                            }
+                        }
+                    },
+                    "required": ["updates"]
                 }
             }
         }

@@ -19,6 +19,8 @@
       @continue="handleContinueTask"
       @approve-tool="approveTool"
       @submit-tool="submitToolResponse"
+      @next-phase="handleNextPhase"
+      @rollback="handleRollback"
     />
     
     <TaskCreateModal 
@@ -94,7 +96,9 @@ const openCreateModal = async () => {
     initial_prompt: '', 
     agent_id: agents.value.length > 0 ? agents.value[0].id : null,
     project_id: projects.value.length > 0 ? projects.value[0].id : null,
-    auto_approve_tools: false
+    auto_approve_tools: false,
+    type: 'standard',
+    target_action: 'full_execution'
   }
   showModal.value = true
 }
@@ -115,7 +119,9 @@ const duplicateTask = async () => {
     initial_prompt: prompt,
     agent_id: t.agent_id,
     project_id: projId,
-    auto_approve_tools: !!t.auto_approve_tools
+    auto_approve_tools: !!t.auto_approve_tools,
+    type: t.type || 'standard',
+    target_action: t.target_action || 'full_execution'
   };
   showModal.value = true;
 }
@@ -150,6 +156,32 @@ const handleContinueTask = async (promptText) => {
   } catch (e) {
     console.error("Ошибка при продолжении задачи:", e);
     alert("Не удалось продолжить задачу");
+  }
+}
+
+const handleNextPhase = async (phase) => {
+  if (!activeTaskId.value) return;
+  try {
+    await api.nextTaskPhase(activeTaskId.value, phase);
+    await api.continueTask(activeTaskId.value, `Одобрено. Переходим в фазу: ${phase.toUpperCase()}. Действуй согласно инструкциям текущей фазы.`);
+    await fetchTasks();
+    await loadLogs(true);
+  } catch (e) {
+    console.error("Ошибка переключения фазы:", e);
+  }
+}
+
+const handleRollback = async () => {
+  if (!activeTaskId.value) return;
+  if (!confirm("Вы уверены, что хотите откатить все изменения, сделанные агентом в этой задаче? Текущие файлы будут заменены версиями из бекапа задачи.")) return;
+  
+  try {
+    const res = await api.rollbackTask(activeTaskId.value);
+    alert(res.message || "Откат инициирован");
+    await loadLogs(true);
+  } catch (e) {
+    console.error("Ошибка отката:", e);
+    alert("Произошла ошибка при откате");
   }
 }
 

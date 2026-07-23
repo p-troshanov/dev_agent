@@ -4,10 +4,10 @@ import os
 import zipfile
 import io
 import re
-
+import shutil
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Response, Depends
 from backend.core.database import get_db
-from backend.core.schemas import TaskCreate, TaskToolConfirm, TaskToolResponse
+from backend.core.schemas import TaskCreate, TaskToolConfirm, TaskToolResponse, TaskPhaseUpdate
 from backend.core.tasks.runner import run_task
 from backend.core.state import state
 from backend.core.auth import get_current_user
@@ -27,9 +27,9 @@ def get_tasks(current_user: dict = Depends(get_current_user)):
     with get_db() as conn:
         with conn.cursor() as c:
             c.execute('''
-                SELECT t.id, t.title, p.name as project_name, t.status, t.created_at, 
-                       t.agent_id, a.name, t.work_dir, t.auto_approve_tools, 
-                       COALESCE(SUM(ls.cost), 0.0) as total_cost
+                SELECT t.id, t.title, p.name as project_name, t.status, t.created_at,
+                        t.agent_id, a.name, t.work_dir, t.auto_approve_tools,
+                        COALESCE(SUM(ls.cost), 0.0) as total_cost, t.type, t.current_phase, t.target_action
                 FROM tasks t
                 LEFT JOIN agents a ON t.agent_id = a.id
                 LEFT JOIN projects p ON t.project_id = p.id
@@ -49,7 +49,10 @@ def get_tasks(current_user: dict = Depends(get_current_user)):
                     "agent_name": r[6] or "",
                     "work_dir": r[7] or "",
                     "auto_approve_tools": bool(r[8]),
-                    "total_cost": float(r[9])
+                    "total_cost": float(r[9]),
+                    "type": r[10] or "standard",
+                    "current_phase": r[11] or "discovery",
+                    "target_action": r[12] or "full_execution"
                 } for r in c.fetchall()
             ]
 
@@ -65,10 +68,10 @@ async def create_task(data: TaskCreate, background_tasks: BackgroundTasks, curre
                 p_row = c.fetchone()
                 if p_row and p_row[0]:
                     target_work_dir = p_row[0].replace('\\', '/')
-
             auto_approve_val = 1 if data.auto_approve_tools else 0
-            c.execute('INSERT INTO tasks (user_id, title, project_id, status, agent_id, work_dir, is_cancelled, auto_approve_tools) VALUES (%s, %s, %s, %s, %s, %s, 0, %s) RETURNING id',
-                       (user_id, data.title, data.project_id, 'pending', data.agent_id, target_work_dir, auto_approve_val))
+            
+            c.execute('INSERT INTO tasks (user_id, title, project_id, status, agent_id, work_dir, is_cancelled, auto_approve_tools, type, current_phase, target_action) VALUES (%s, %s, %s, %s, %s, %s, 0, %s, %s, %s, %s) RETURNING id',
+                       (user_id, data.title, data.project_id, 'pending', data.agent_id, target_work_dir, auto_approve_val, data.type, 'discovery', data.target_action))
             task_id = c.fetchone()[0]
             
             c.execute('''INSERT INTO task_logs (task_id, role, content, agent_name)
@@ -92,6 +95,58 @@ async def continue_task(task_id: int, data: TaskContinue, background_tasks: Back
         
     background_tasks.add_task(run_task, task_id, data.prompt, True, user_id)
     return {"status": "ok"}
+
+@router.post("/{task_id}/next_phase")
+def next_task_phase(task_id: int, data: TaskPhaseUpdate, current_user: dict = Depends(get_current_user)):
+    user_id = current_user["id"]
+    with get_db() as conn:
+        with conn.cursor() as c:
+            c.execute("UPDATE tasks SET current_phase = %s WHERE id = %s AND user_id = %s", (data.phase, task_id, user_id))
+        conn.commit()
+    return {"status": "ok"}
+
+@router.post("/{task_id}/rollback")
+def rollback_task(task_id: int, current_user: dict = Depends(get_current_user)):
+    user_id = current_user["id"]
+    
+    with get_db() as conn:
+        with conn.cursor() as c:
+            c.execute("SELECT work_dir FROM tasks WHERE id = %s AND user_id = %s", (task_id, user_id))
+            row = c.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Задача не найдена")
+            work_dir = row[0]
+            
+    base_user_dir = os.path.abspath(os.path.join(BASE_WORKSPACE, f"user_{user_id}"))
+    target_dir = work_dir if work_dir else base_user_dir
+    backup_dir = os.path.join(target_dir, ".backups", f"task_{task_id}")
+    
+    if not os.path.exists(backup_dir):
+        raise HTTPException(status_code=400, detail="Бэкапы для этой задачи не найдены. Возможно, агент еще не вносил изменений.")
+        
+    try:
+        restored_count = 0
+        for root, _, files in os.walk(backup_dir):
+            for file in files:
+                bak_path = os.path.join(root, file)
+                rel_path = os.path.relpath(bak_path, backup_dir)
+                orig_path = os.path.join(target_dir, rel_path)
+                
+                os.makedirs(os.path.dirname(orig_path), exist_ok=True)
+                shutil.copy2(bak_path, orig_path)
+                restored_count += 1
+                
+        # Пишем в лог, что пользователь откатил изменения
+        with get_db() as conn:
+            with conn.cursor() as c:
+                c.execute('''INSERT INTO task_logs (task_id, role, content, agent_name)
+                              VALUES (%s, %s, %s, %s)''',
+                          (task_id, 'system', f"Пользователь инициировал откат. Восстановлено файлов из бекапа задачи: {restored_count}", 'Система'))
+            conn.commit()
+                
+        return {"status": "ok", "message": f"Откат выполнен успешно. Восстановлено файлов: {restored_count}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка при откате: {str(e)}")
 
 @router.get("/{task_id}/logs")
 def get_task_logs(task_id: int, current_user: dict = Depends(get_current_user)):
@@ -150,7 +205,7 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
     tools_by_category = {}
     tools_map = {}
     for t_name, t_desc, t_cat, t_schema in all_tools:
-        cat = t_cat or "Системные"
+        cat = t_cat or "Без категории"
         if cat not in tools_by_category:
             tools_by_category[cat] = []
         tools_by_category[cat].append(f"{t_name} - {t_desc}")
@@ -175,13 +230,13 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
             if rel != '.':
                 fake_work = f"{fake_base}/{rel}"
 
-    dir_info = f"\n\nРабочая директория задачи: {fake_work}\nАбсолютный корень (sandbox) пользователя: {fake_base}." if fake_work else ""
+    dir_info = f"\n\nДиректория проекта: {fake_work}\nКорень вашей среды (sandbox) сервера: {fake_base}." if fake_work else ""
     
     sys_prompt = (
-        f"Ты системный агент '{agent_name or 'Основной'}'. "
-        "Тебе предоставлена история выполнения задачи. "
-        "Инструменты переданы в формате JSON, если они требуются. "
-        "Используй 'finish_task', если задача завершена."
+        f"Ты агент '{agent_name or 'РИТА'}'. "
+        "Пользователь загружает тебе экспорт контекста задачи. "
+        "Схемы всех инструментов представлены в формате JSON, ты можешь вызывать их стандартным способом. "
+        "Когда задача выполнена, вызови 'finish_task', чтобы проинформировать систему."
         f"{dir_info}"
     )
 
@@ -203,7 +258,7 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
                 has_tool_request = False
                 requested_tool_names.clear()
             elif r_role == 'assistant':
-                messages.append({"role": "assistant", "content": r_content or "(Вызов инструмента...)"})
+                messages.append({"role": "assistant", "content": r_content or "(Вызван инструмент...)"})
                 if r_content and not t_call_id:
                     parsed = extract_json(r_content)
                     if isinstance(parsed, list):
@@ -212,14 +267,14 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
                                 requested_tool_names.add(item)
                         has_tool_request = True
             elif r_role == 'tool':
-                messages.append({"role": "user", "content": f"Ответ инструмента ({r_agent}): {r_content}"})
+                messages.append({"role": "user", "content": f"Результат инструмента ({r_agent}): {r_content}"})
                 if r_agent:
                     m = re.search(r'\((.*?)\)', r_agent)
                     if m:
                         requested_tool_names.add(m.group(1))
                         has_tool_request = True
     else:
-        messages.append({"role": "user", "content": "Начни выполнение задачи."})
+        messages.append({"role": "user", "content": "Контекст задачи пуст."})
         
     export_data = {
         "model": "gpt-4o",
@@ -229,21 +284,17 @@ def export_task_context(task_id: int, current_user: dict = Depends(get_current_u
     if has_tool_request:
         if "finish_task" not in requested_tool_names:
             requested_tool_names.add("finish_task")
-
         active_schemas = []
         for name in requested_tool_names:
             if name in tools_map:
                 active_schemas.append(tools_map[name])
-
         formatted_tools = [s if "type" in s else {"type": "function", "function": s} for s in active_schemas]
         if formatted_tools:
             export_data["tools"] = formatted_tools
-        
+            
     output = json.dumps(export_data, ensure_ascii=False, indent=2)
-
     headers = {"Content-Disposition": f"attachment; filename=task_payload_{task_id}.json"}
     return Response(content=output, media_type="application/json; charset=utf-8", headers=headers)
-
 
 @router.get("/{task_id}/debug_export")
 def export_task_debug(task_id: int, current_user: dict = Depends(get_current_user)):
@@ -252,7 +303,7 @@ def export_task_debug(task_id: int, current_user: dict = Depends(get_current_use
     debug_dir = os.path.join(base_user_dir, ".debug", f"task_{task_id}").replace('\\', '/')
     
     if not os.path.exists(debug_dir) or not os.listdir(debug_dir):
-        raise HTTPException(status_code=404, detail="Отладочные логи для этой задачи не найдены.")
+        raise HTTPException(status_code=404, detail="Отладочные данные не найдены")
         
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -266,7 +317,6 @@ def export_task_debug(task_id: int, current_user: dict = Depends(get_current_use
     zip_buffer.seek(0)
     headers = {"Content-Disposition": f"attachment; filename=task_debug_{task_id}.zip"}
     return Response(content=zip_buffer.getvalue(), media_type="application/zip", headers=headers)
-
 
 @router.post("/{task_id}/cancel")
 def cancel_task(task_id: int, current_user: dict = Depends(get_current_user)):
@@ -283,7 +333,6 @@ def cancel_task(task_id: int, current_user: dict = Depends(get_current_user)):
             
     return {"status": "ok"}
 
-
 @router.post("/{task_id}/approve_tool")
 def approve_task_tool(task_id: int, data: TaskToolConfirm, current_user: dict = Depends(get_current_user)):
     future = state.pending_task_tools.get(data.tool_call_id)
@@ -296,7 +345,6 @@ def approve_task_tool(task_id: int, data: TaskToolConfirm, current_user: dict = 
         conn.commit()
         
     return {"status": "ok"}
-
 
 @router.post("/{task_id}/submit_tool_response")
 def submit_task_tool_response(task_id: int, data: TaskToolResponse, current_user: dict = Depends(get_current_user)):

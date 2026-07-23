@@ -4,19 +4,19 @@ import os
 from backend.core.database import get_db
 
 def sync_user_tools(user_id: int):
-    """Синхронизирует системные инструменты в персональную таблицу пользователя."""
-    print(f"🛠️ [TOOLS REGISTRY] Синхронизация инструментов для пользователя ID: {user_id}...")
+    """Синхронизирует набор системных инструментов для пользователя."""
+    print(f"Синхронизация базовых инструментов [TOOLS REGISTRY] для пользователя ID: {user_id}...")
     
     tools_file_path = os.path.join(os.path.dirname(__file__), 'tools.json')
     try:
         with open(tools_file_path, "r", encoding="utf-8") as f:
             content = f.read()
-            # Удаляем комментарии, которые могут быть добавлены LLM (например, путь к файлу)
+            # Очищаем от комментариев перед передачей в LLM (на всякий случай)
             lines = [line for line in content.split('\n') if not line.strip().startswith('#') and not line.strip().startswith('//')]
             clean_content = '\n'.join(lines)
             tools_registry = json.loads(clean_content)
     except Exception as e:
-        print(f"⚠️ Ошибка загрузки tools.json: {e}")
+        print(f"Ошибка загрузки tools.json: {e}")
         return
 
     try:
@@ -24,7 +24,7 @@ def sync_user_tools(user_id: int):
             with conn.cursor() as c:
                 for tool in tools_registry:
                     name = tool["name"]
-                    # Достаем описание из схемы, так как внешнее поле удалено для чистоты файла
+                    # Пытаемся взять описание из корня, если нет - из схемы
                     description = tool.get("description") or tool.get("schema_json", {}).get("function", {}).get("description", "")
                     category = tool.get("category", "")
                     schema_json_str = json.dumps(tool["schema_json"], ensure_ascii=False)
@@ -34,21 +34,21 @@ def sync_user_tools(user_id: int):
                     row = c.fetchone()
                     
                     if row is None:
-                        c.execute('''INSERT INTO user_tools (user_id, name, description, category, schema_json, settings, is_active, requires_approval) 
-                                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)''',
+                        c.execute('''INSERT INTO user_tools (user_id, name, description, category, schema_json, settings, is_active, requires_approval)
+                                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)''',
                                   (user_id, name, description, category, schema_json_str, settings_json_str, 1, 0))
                     else:
                         tool_id = row[0]
-                        # Обновляем схему и описание, не затирая пользовательские настройки и аппрувы
-                        c.execute('''UPDATE user_tools SET schema_json = %s, description = %s WHERE id = %s AND user_id = %s''', 
-                                  (schema_json_str, description, tool_id, user_id))
-            
-            conn.commit()
+                        # Обновляем схему, если инструмент уже был (возможно, обновилась логика)
+                        c.execute('''UPDATE user_tools SET schema_json = %s, description = %s WHERE id = %s AND user_id = %s''',
+                                   (schema_json_str, description, tool_id, user_id))
+
+                conn.commit()
     except Exception as e:
-        print(f"⚠️ Ошибка при синхронизации инструментов с БД пользователя: {e}")
+        print(f"Ошибка синхронизации инструментов: {e}")
 
 def sync_tools_to_db():
-    """Синхронизирует инструменты для всех уже зарегистрированных пользователей на старте сервера."""
+    """Синхронизирует инструменты для всех пользователей при старте."""
     try:
         with get_db() as conn:
             with conn.cursor() as c:
@@ -57,5 +57,4 @@ def sync_tools_to_db():
         for u in users:
             sync_user_tools(u[0])
     except Exception as e:
-        print(f"⚠️ Ошибка глобальной синхронизации инструментов: {e}")
-
+        print(f"Ошибка инициализации инструментов: {e}")

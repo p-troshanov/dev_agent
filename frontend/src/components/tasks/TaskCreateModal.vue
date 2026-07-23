@@ -28,6 +28,26 @@
       </div>
 
       <div class="form-group mt-2">
+        <label>Режим выполнения</label>
+        <div style="display: flex; gap: 16px; margin-top: 4px;">
+          <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-main); font-size: 13px;">
+            <input type="radio" v-model="form.type" value="standard" style="accent-color: var(--accent-blue);" /> Свободный агент
+          </label>
+          <label class="radio-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-main); font-size: 13px;">
+            <input type="radio" v-model="form.type" value="step_by_step" style="accent-color: var(--accent-blue);" /> Пошаговый (Анализ -> План -> Код)
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group mt-2" v-if="form.type === 'step_by_step'">
+        <label>Конечная цель задачи</label>
+        <select v-model="form.target_action" class="modern-input select-input">
+          <option value="plan_only">Только составить план (без внесения изменений)</option>
+          <option value="full_execution">Полная реализация (написать код по плану)</option>
+        </select>
+      </div>
+
+      <div class="form-group mt-2" v-if="form.type === 'standard'">
         <label class="checkbox-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-main); font-size: 13px; font-weight: 500; text-transform: none;">
           <input type="checkbox" v-model="form.auto_approve_tools" style="accent-color: var(--accent-blue); width: 16px; height: 16px; flex-shrink: 0;" />
           <span>Разрешить выполнять все инструменты без человека в контуре (кроме ask_user)</span>

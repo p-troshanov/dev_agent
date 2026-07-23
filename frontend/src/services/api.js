@@ -100,6 +100,8 @@ export const api = {
   approveTaskTool: (id, tool_call_id, approved) => request(`/tasks/${id}/approve_tool`, 'POST', { tool_call_id, approved }),
   submitTaskToolResponse: (id, tool_call_id, response_text) => request(`/tasks/${id}/submit_tool_response`, 'POST', { tool_call_id, response_text }),
   continueTask: (id, prompt) => request(`/tasks/${id}/continue`, 'POST', { prompt }),
+  nextTaskPhase: (id, phase) => request(`/tasks/${id}/next_phase`, 'POST', { phase }),
+  rollbackTask: (id) => request(`/tasks/${id}/rollback`, 'POST'),
 
   getKeys: () => request('/keys'),
   addKey: (data) => request('/keys', 'POST', data),

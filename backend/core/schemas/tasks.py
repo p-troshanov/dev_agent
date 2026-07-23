@@ -15,6 +15,11 @@ class TaskCreate(BaseModel):
     project_id: int
     work_dir: Optional[str] = ""
     auto_approve_tools: bool = False
+    type: Optional[str] = "standard"
+    target_action: Optional[str] = "full_execution"
+
+class TaskPhaseUpdate(BaseModel):
+    phase: str
 
 class TaskToolConfirm(BaseModel):
     tool_call_id: str

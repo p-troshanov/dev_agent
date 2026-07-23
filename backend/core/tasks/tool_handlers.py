@@ -3,7 +3,6 @@ import json
 import asyncio
 import os
 import shutil
-
 from backend.core.database import get_db
 from backend.core.state import state
 from backend.core.tasks.tools_impl.utils import _call_tool_node, _hide_host_path
@@ -48,11 +47,11 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
             
         await state.broadcast_ws({"type": "TASK_UPDATED", "task_id": task_id}, user_id)
         
-        warning_msg = f"Ожидается подтверждение для: {f_name}"
+        warning_msg = f"Инструмент: {f_name}"
         if f_name in ["run_terminal", "manage_background_service"]:
-            warning_msg = f"Команда:\n`{args.get('command', '')}`\n\nРазрешить выполнение?"
+            warning_msg = f"Потенциально опасная команда:\n`{args.get('command', '')}`\n\nТребуется подтверждение."
         elif f_name in ["ask_user", "message_user"]:
-            warning_msg = f"Сообщение от агента:\n**{args.get('question', args.get('message', 'Нет сообщения.'))}**"
+            warning_msg = f"Сообщение от агента:\n**{args.get('question', args.get('message', 'Ответьте агенту.'))}**"
             
         approval_payload = {
             "is_plugin_request": True,
@@ -64,7 +63,7 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
         with get_db() as conn:
             with conn.cursor() as c:
                 c.execute('''INSERT INTO task_logs (task_id, role, content, agent_name, tool_call_id, pending_approval)
-                              VALUES (%s, %s, %s, %s, %s, %s)''', (task_id, "tool", json.dumps(approval_payload, ensure_ascii=False), f"Плагин ({f_name})", tool_call_id, 1))
+                              VALUES (%s, %s, %s, %s, %s, %s)''', (task_id, "tool", json.dumps(approval_payload, ensure_ascii=False), f"Система ({f_name})", tool_call_id, 1))
             conn.commit()
             
         future = asyncio.Future()
@@ -96,7 +95,7 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
                     args.update(plugin_data.get("new_args", {}))
                     approved = True
                 elif plugin_data.get("action") == "resolve_tool":
-                    return {"result_str": plugin_data.get("result_str", "Выполнено."), "abort_subsequent_tools": False}
+                    return {"result_str": plugin_data.get("result_str", "Выполнено плагином."), "abort_subsequent_tools": False}
                 else:
                     approved = True
             except:
@@ -114,7 +113,7 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
                 if row and row[0]:
                     tool_settings = row[0] if isinstance(row[0], dict) else json.loads(row[0])
 
-    FS_CODE_TOOLS = {"read_file", "check_file_exists", "write_file", "edit_file", "create_directory", "attach_file", "scan_project", "restore_backup", "check_syntax", "install_dependencies", "view_file_diff"}
+    FS_CODE_TOOLS = {"read_file", "check_file_exists", "write_file", "edit_file", "create_directory", "attach_file", "scan_project", "restore_backup", "check_syntax", "install_dependencies", "view_file_diff", "request_files_to_read", "batch_update_files"}
     SYSTEM_TOOLS = {"run_terminal", "manage_background_service", "get_service_logs", "manage_agent", "delegate_task", "github_sync", "summarize_text", "finish_task"}
 
     if f_name in FS_CODE_TOOLS:
@@ -124,7 +123,7 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
     else:
         res_dict = {
             "endpoint": None, "payload": {}, "file_path": None, "abort_subsequent_tools": False,
-            "result_str": f"Неизвестный инструмент {f_name} (не зарегистрирован).",
+            "result_str": f"Неизвестный инструмент {f_name} (или нет доступа).",
             "last_modified_file": last_modified_file, "last_backup_file": last_backup_file
         }
 
@@ -155,8 +154,8 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
         except:
             result_str = raw_result
             
-        if f_name in ["write_file", "edit_file"] and "Ошибка" not in result_str and "ok" not in result_str and "error" not in result_str.lower():
-            result_str += f"\n\n[Действие выполнено для: {file_path}]"
+        if f_name in ["write_file", "edit_file"] and "ошибка" not in result_str and "ok" not in result_str and "error" not in result_str.lower():
+            result_str += f"\n\n[Система: Файл {file_path} успешно изменен]"
             
         if f_name in ["run_terminal", "install_dependencies", "check_syntax"]:
             lower_res = result_str.lower()
@@ -182,14 +181,14 @@ async def handle_tool_call(f_name: str, args: dict, work_dir: str, last_modified
                 if last_modified_file and last_backup_file and os.path.exists(last_backup_file):
                     try:
                         shutil.copy2(last_backup_file, last_modified_file)
-                        result_str += f"\n\n[Замечена ошибка! Файл {last_modified_file} был автоматически восстановлен из бэкапа.]"
+                        result_str += f"\n\n[СИСТЕМА ОТКАТИЛА ИЗМЕНЕНИЯ В {last_modified_file} ПОСЛЕ ОШИБКИ В ТЕРМИНАЛЕ]"
                     except Exception:
                         pass
                 
                 if f_name == "run_terminal":
-                    result_str += "\n\n[Команда завершилась с ошибкой. Проанализируй логи и исправь ошибку.]"
+                    result_str += "\n\n[Выполнение остановлено. Проанализируй ошибку. Исправь код или команду.]"
                 else:
-                    result_str += "\n\n[Синтаксис кода содержит ошибку или не удалось установить зависимости. Изменения откачены. Попробуй исправить скрипт.]"
+                    result_str += "\n\n[Выполнение остановлено из-за критической ошибки]"
                 abort_subsequent_tools = True
 
     if f_name not in ["run_terminal", "install_dependencies", "check_syntax"] and (result_str.startswith("Ошибка:") or result_str.startswith("Error:") or result_str.startswith("Exception:")):
